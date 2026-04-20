@@ -1,12 +1,17 @@
 use ratatui::prelude::*;
 use ratatui_hypertile::{EventOutcome, HypertileEvent, KeyCode, Modifiers};
-use std::time::Duration;
+use std::time::{Duration, Instant};
+
+use crate::{
+    AnimationConfig,
+    runtime::animation::{SpaceAnimation, SpaceTransitions},
+};
 
 use super::HypertileRuntime;
 
-struct Tab {
+pub struct Tab {
     label: String,
-    runtime: HypertileRuntime,
+    pub runtime: HypertileRuntime,
 }
 
 /// Small tab manager around [`HypertileRuntime`].
@@ -15,6 +20,9 @@ struct Tab {
 /// workspace model without building it yourself. It intercepts a few `Ctrl+...`
 /// keys for tab management and forwards everything else to the active tab.
 pub struct WorkspaceRuntime {
+    /// offset, old_active, new_active
+    animation: SpaceTransitions,
+    ani_config: AnimationConfig,
     tabs: Vec<Tab>,
     active: usize,
     factory: Box<dyn Fn() -> HypertileRuntime>,
@@ -45,6 +53,8 @@ impl WorkspaceRuntime {
     pub fn new(factory: impl Fn() -> HypertileRuntime + 'static) -> Self {
         let first = factory();
         Self {
+            animation: SpaceTransitions::default(),
+            ani_config: AnimationConfig::default(),
             tabs: vec![Tab {
                 label: "1".to_string(),
                 runtime: first,
@@ -64,7 +74,14 @@ impl WorkspaceRuntime {
 
     /// Mirrors [`HypertileRuntime::next_frame_in`] for the active tab.
     pub fn next_frame_in(&self) -> Option<Duration> {
-        self.tabs[self.active].runtime.next_frame_in()
+        if let Some(dur) = self
+            .animation
+            .next_frame_in(Instant::now(), self.ani_config.frame_interval)
+        {
+            Some(dur)
+        } else {
+            self.tabs[self.active].runtime.next_frame_in()
+        }
     }
 
     pub fn tab_count(&self) -> usize {
@@ -105,12 +122,30 @@ impl WorkspaceRuntime {
 
     /// Wraps around.
     pub fn next_tab(&mut self) {
-        self.active = (self.active + 1) % self.tabs.len();
+        let new = (self.active + 1) % self.tabs.len();
+        if new == self.active {
+            return;
+        }
+        self.animation.push(SpaceAnimation::new(
+            Duration::from_secs(5),
+            self.active,
+            new,
+        ));
+        self.active = new;
     }
 
     /// Wraps around.
     pub fn prev_tab(&mut self) {
-        self.active = (self.active + self.tabs.len() - 1) % self.tabs.len();
+        let new = (self.active + self.tabs.len() - 1) % self.tabs.len();
+        if new == self.active {
+            return;
+        }
+        self.animation.push(SpaceAnimation::new(
+            Duration::from_secs(5),
+            self.active,
+            new,
+        ));
+        self.active = new;
     }
 
     /// Does nothing if the index is out of range.
@@ -167,11 +202,20 @@ impl WorkspaceRuntime {
                 _ => {}
             }
         }
+        if let Some(first) = self.animation.old_space()
+            && let HypertileEvent::Tick = event
+        {
+            self.tabs[first].runtime.handle_event(event);
+        }
         self.tabs[self.active].runtime.handle_event(event)
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        self.tabs[self.active].runtime.render(area, buf);
+        if !self.animation.is_finished() {
+            self.animation.display_buf(area, &mut self.tabs, buf);
+        } else {
+            self.tabs[self.active].runtime.render(area, buf);
+        }
     }
 }
 

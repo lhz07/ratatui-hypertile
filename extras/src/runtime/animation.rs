@@ -1,7 +1,10 @@
+use crate::runtime::workspace::Tab;
+
 use super::types::AnimationConfig;
+use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui_hypertile::PaneId;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::time::{Duration, Instant};
 
 /// Drives the per-pane slide animation for `MoveFocused` actions.
@@ -94,8 +97,14 @@ impl AnimationState {
         });
 
         for (pane_id, to) in panes {
-            let Some(from) = self.before_panes.get(&pane_id).copied() else {
-                continue;
+            let from = match self.before_panes.get(&pane_id).copied() {
+                Some(from) => from,
+                None => Rect {
+                    x: to.x + to.width / 2,
+                    y: to.y + to.height / 2,
+                    width: 0,
+                    height: 0,
+                },
             };
             if from != to {
                 transitions.insert(pane_id, RectTransition { from, to });
@@ -194,6 +203,153 @@ impl ActiveAnimation {
 
     fn transition_for(&self, pane_id: PaneId) -> Option<RectTransition> {
         self.transitions.get(&pane_id).copied()
+    }
+}
+
+fn copy_with_offset(src: &Buffer, dst: &mut Buffer, screen_area: Rect, offset_x: i32) {
+    for y in screen_area.top()..screen_area.bottom() {
+        for x in screen_area.left()..screen_area.right() {
+            // 计算当前屏幕坐标 (x, y) 对应源 Buffer 中的哪一个点
+            let src_x = x as i32 - offset_x;
+
+            // 检查计算出的源坐标是否在离屏 Buffer 的合法范围内
+            if src_x >= src.area.left() as i32 && src_x < src.area.right() as i32 {
+                let src_cell = &src[(src_x as u16, y)];
+                // 将 Cell 内容（字符、样式等）完整拷贝
+                dst[(x, y)] = src_cell.clone();
+            }
+        }
+    }
+}
+
+fn draw_workspace_transition(
+    area: Rect,
+    progress: f32,
+    offset: f32,
+    direction: AniDirection,
+    old: &Buffer,
+    new: &Buffer,
+    main_buffer: &mut Buffer,
+) {
+    let width = area.width as f32;
+    let offset_a;
+    let offset_b;
+    match direction {
+        AniDirection::Left => {
+            offset_a = (-width * progress + offset) as i32;
+            offset_b = (width * (1.0 - progress) - offset) as i32;
+        }
+        AniDirection::Right => {
+            offset_a = (width * progress + offset) as i32;
+            offset_b = (-width * (1.0 - progress) + offset) as i32;
+        }
+    }
+
+    copy_with_offset(&old, main_buffer, area, offset_a);
+    copy_with_offset(&new, main_buffer, area, offset_b);
+}
+
+#[derive(Debug, Default)]
+pub struct SpaceTransitions {
+    transitions: VecDeque<SpaceAnimation>,
+}
+
+impl SpaceTransitions {
+    pub fn next_frame_in(&self, now: Instant, frame_interval: Duration) -> Option<Duration> {
+        let first = self.transitions.front()?;
+        first.next_frame_in(now, frame_interval)
+    }
+    pub fn is_finished(&self) -> bool {
+        self.transitions.is_empty()
+    }
+    pub fn old_space(&self) -> Option<usize> {
+        Some(self.transitions.front()?.from)
+    }
+    pub fn push(&mut self, mut ani: SpaceAnimation) {
+        if self.transitions.is_empty() {
+            self.transitions.push_back(ani);
+        } else if self.transitions.len() == 1 {
+            let first = &mut self.transitions[0];
+            if first.direction != ani.direction {
+                ani.record_progress = first.progress(Instant::now());
+                *first = ani;
+            } else {
+                self.transitions.push_back(ani);
+            }
+        }
+    }
+    pub fn display_buf(&mut self, area: Rect, tabs: &mut [Tab], main_buffer: &mut Buffer) {
+        if let Some(first) = self.transitions.front_mut() {
+            let progress = first.progress(Instant::now());
+            let mut buf_old = Buffer::empty(area);
+            tabs[first.from].runtime.render(area, &mut buf_old);
+            let mut buf_new = Buffer::empty(area);
+            tabs[first.to].runtime.render(area, &mut buf_new);
+            draw_workspace_transition(
+                area,
+                progress,
+                area.width as f32 * first.record_progress,
+                first.direction,
+                &buf_old,
+                &buf_new,
+                main_buffer,
+            );
+            if first.is_finished(Instant::now()) {
+                self.transitions.pop_front();
+            }
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+pub enum AniDirection {
+    Left,
+    Right,
+}
+
+#[derive(Debug)]
+pub struct SpaceAnimation {
+    started_at: Instant,
+    duration: Duration,
+    from: usize,
+    to: usize,
+    direction: AniDirection,
+    record_progress: f32,
+}
+
+impl SpaceAnimation {
+    pub fn new(duration: Duration, from: usize, to: usize) -> Self {
+        Self {
+            started_at: Instant::now(),
+            duration,
+            from,
+            to,
+            direction: if from < to {
+                AniDirection::Left
+            } else {
+                AniDirection::Right
+            },
+            record_progress: 0.0,
+        }
+    }
+    fn is_finished(&self, now: Instant) -> bool {
+        now.saturating_duration_since(self.started_at) >= self.duration
+    }
+
+    fn progress(&self, now: Instant) -> f32 {
+        let elapsed = now.saturating_duration_since(self.started_at);
+        ease_out_cubic(elapsed.as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0)
+    }
+
+    fn next_frame_in(&self, now: Instant, frame_interval: Duration) -> Option<Duration> {
+        let elapsed = now.saturating_duration_since(self.started_at);
+        if elapsed >= self.duration {
+            return None;
+        }
+
+        let until_end = self.duration - elapsed;
+        let until_next_frame = remaining_until_next_frame(elapsed, frame_interval);
+        Some(until_end.min(until_next_frame))
     }
 }
 

@@ -210,11 +210,17 @@ impl HypertileRuntime {
         direction: Direction,
         plugin_type: &str,
     ) -> Result<PaneId, RuntimeError> {
+        let now = Instant::now();
+
+        self.capture_displayed_rects(now);
+
         let plugin = self.registry.instantiate_plugin(plugin_type)?;
         let pane_id = self.core.split_focused(direction)?;
         self.registry
             .mount_plugin_instance(pane_id, plugin_type, plugin);
-        self.animation_state.clear();
+
+        self.start_action_animation(now);
+
         Ok(pane_id)
     }
 
@@ -384,7 +390,10 @@ impl HypertileRuntime {
 
     fn can_animate_action(&self, action: HypertileAction) -> bool {
         self.animation_config.enabled
-            && matches!(action, HypertileAction::MoveFocused { .. })
+            && matches!(
+                action,
+                HypertileAction::MoveFocused { .. } | HypertileAction::CloseFocused
+            )
             && self.animation_state.last_area().is_some()
     }
 
