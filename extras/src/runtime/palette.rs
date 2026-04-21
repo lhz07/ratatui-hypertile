@@ -193,7 +193,7 @@ impl HypertileRuntime {
                     }))
                 } else {
                     let direction = self.auto_split_direction();
-                    Some(self.split_focused(direction, &plugin_type).map(|_| {
+                    Some(self.split_focused(Some(direction), &plugin_type).map(|_| {
                         self.palette.show = false;
                         EventOutcome::Consumed
                     }))

@@ -55,9 +55,9 @@ fn main() -> io::Result<()> {
 
     let rt = workspace.active_runtime_mut();
     let _ = rt.replace_focused_plugin("monitor");
-    let _ = rt.split_focused(Direction::Vertical, "logs");
+    let _ = rt.split_focused(Some(Direction::Vertical), "logs");
     let _ = rt.focus_pane(PaneId::ROOT);
-    let _ = rt.split_focused(Direction::Horizontal, "network");
+    let _ = rt.split_focused(Some(Direction::Horizontal), "network");
 
     let result = run(&mut terminal, &mut workspace);
     ratatui::restore();

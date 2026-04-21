@@ -218,10 +218,16 @@ impl Hypertile {
     }
 
     /// Splits the focused pane with the current [`SplitPolicy`].
-    pub fn split_focused(&mut self, direction: Direction) -> Result<PaneId, StateError> {
+    pub fn split_focused(&mut self, direction: Option<Direction>) -> Result<PaneId, StateError> {
         let pane_id = self.state.allocate_pane_id();
-        self.state
-            .split_with_ratio(direction, pane_id, self.split_policy.ratio())?;
+        match direction {
+            Some(direction) => self.state.split_ratio_with_direction(
+                direction,
+                pane_id,
+                self.split_policy.ratio(),
+            )?,
+            None => self.state.split_ratio(pane_id, self.split_policy.ratio())?,
+        };
         Ok(pane_id)
     }
 
@@ -247,29 +253,35 @@ impl Hypertile {
         action: HypertileAction,
     ) -> Result<EventOutcome, StateError> {
         let changed = match action {
-            HypertileAction::FocusNext => self.state.focus_next(),
-            HypertileAction::FocusPrev => self.state.focus_prev(),
-            HypertileAction::FocusDirection { direction, towards } => {
+            HypertileAction::FocusNext if !self.state.is_full() => self.state.focus_next(),
+            HypertileAction::FocusPrev if !self.state.is_full() => self.state.focus_prev(),
+            HypertileAction::FocusDirection { direction, towards } if !self.state.is_full() => {
                 self.state.focus_direction(direction, towards)?
             }
-            HypertileAction::SplitFocused { direction } => {
-                self.split_focused(direction)?;
+            HypertileAction::SplitFocused { direction } if !self.state.is_full() => {
+                self.split_focused(Some(direction))?;
                 true
             }
+            HypertileAction::FocusFull => self.state.toggle_focused_full()?,
             HypertileAction::CloseFocused => {
                 self.close_focused()?;
                 true
             }
-            HypertileAction::ResizeFocused { delta } => self.state.resize_focused(delta)?,
-            HypertileAction::SetFocusedRatio { ratio } => self.state.set_focused_ratio(ratio)?,
+            HypertileAction::ResizeFocused { delta } if !self.state.is_full() => {
+                self.state.resize_focused(delta)?
+            }
+            HypertileAction::SetFocusedRatio { ratio } if !self.state.is_full() => {
+                self.state.set_focused_ratio(ratio)?
+            }
             HypertileAction::MoveFocused {
                 direction,
                 towards,
                 scope,
-            } => match scope {
+            } if !self.state.is_full() => match scope {
                 MoveScope::Split => self.state.move_pane_split(direction, towards)?,
                 MoveScope::Window => self.state.move_pane_window(direction, towards)?,
             },
+            _ => false,
         };
         Ok(if changed {
             EventOutcome::Consumed
@@ -305,7 +317,9 @@ mod tests {
             .with_split_policy(SplitPolicy::Golden)
             .build();
 
-        let _ = hypertile.split_focused(Direction::Horizontal).unwrap();
+        let _ = hypertile
+            .split_focused(Some(Direction::Horizontal))
+            .unwrap();
         match hypertile.root() {
             Node::Split { ratio, .. } => assert!((*ratio - 0.618).abs() < 0.001),
             Node::Pane(_) => panic!("root should be split"),
@@ -315,7 +329,9 @@ mod tests {
     #[test]
     fn window_move_without_layout_is_ignored_by_apply_action() {
         let mut hypertile = Hypertile::new();
-        let _ = hypertile.split_focused(Direction::Horizontal).unwrap();
+        let _ = hypertile
+            .split_focused(Some(Direction::Horizontal))
+            .unwrap();
 
         assert_eq!(
             hypertile.apply_action(HypertileAction::MoveFocused {

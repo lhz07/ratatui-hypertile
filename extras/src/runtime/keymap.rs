@@ -5,7 +5,8 @@ use ratatui_hypertile::{HypertileAction, KeyChord, KeyCode, Modifiers, Towards};
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum RuntimeAction {
     Core(HypertileAction),
-    SplitDefault(Direction),
+    SplitDirection(Direction),
+    SplitDefault,
     OpenPalette,
     InteractFocused,
     EnterPluginInput,
@@ -85,6 +86,7 @@ impl HypertileRuntime {
         match chord.code {
             KeyCode::Tab => Some(RuntimeAction::Core(HypertileAction::FocusNext)),
             KeyCode::BackTab => Some(RuntimeAction::Core(HypertileAction::FocusPrev)),
+            KeyCode::Char('f') => Some(RuntimeAction::Core(HypertileAction::FocusFull)),
             KeyCode::Left | KeyCode::Char('h') => {
                 Some(RuntimeAction::Core(HypertileAction::FocusDirection {
                     direction: Direction::Horizontal,
@@ -109,8 +111,9 @@ impl HypertileRuntime {
                     towards: Towards::Start,
                 }))
             }
-            KeyCode::Char('s') => Some(RuntimeAction::SplitDefault(Direction::Horizontal)),
-            KeyCode::Char('v') => Some(RuntimeAction::SplitDefault(Direction::Vertical)),
+            KeyCode::Char('s') => Some(RuntimeAction::SplitDirection(Direction::Horizontal)),
+            KeyCode::Char('v') => Some(RuntimeAction::SplitDirection(Direction::Vertical)),
+            KeyCode::Char('t') => Some(RuntimeAction::SplitDefault),
             KeyCode::Char('d') => Some(RuntimeAction::Core(HypertileAction::CloseFocused)),
             KeyCode::Char('[') => Some(RuntimeAction::Core(HypertileAction::ResizeFocused {
                 delta: -self.core.resize_step(),

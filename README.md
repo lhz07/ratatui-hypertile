@@ -1,10 +1,8 @@
 ![demo](assets/demo.gif)
 
-[![CI](https://github.com/nikolic-milos/ratatui-hypertile/actions/workflows/ci.yml/badge.svg)](https://github.com/nikolic-milos/ratatui-hypertile/actions/workflows/ci.yml)
-[![Crates.io](https://img.shields.io/crates/v/ratatui-hypertile.svg)](https://crates.io/crates/ratatui-hypertile)
-[![Docs.rs](https://docs.rs/ratatui-hypertile/badge.svg)](https://docs.rs/ratatui-hypertile)
-
 Cook up delicious terminal interfaces with Hyprland-style tiling for [Ratatui](https://github.com/ratatui/ratatui). Splits, tabs, animations, persistence.
+
+Originated from this [repo](https://github.com/nikolic-milos/ratatui-hypertile), but I add more animation and want to make it something like `tmux`
 
 ## What's in the box
 
@@ -26,9 +24,33 @@ cargo run --example core_only
 
 **Keys:**
 
-`s` `v` split &ensp; `d` close &ensp; `hjkl` focus &ensp; `HJKL` move &ensp; `[` `]` resize
+### General
 
-`p` palette &ensp; `i` plugin input &ensp; `Ctrl+t` new tab &ensp; `Ctrl+w` close tab &ensp; `Ctrl+c` quit
+| Key      | Operation |
+| -------- | --------- |
+| Ctrl + c | quit      |
+
+### Block
+
+| Key             | Operation                                   |
+| --------------- | ------------------------------------------- |
+| p               | open new block                              |
+| d               | close focused block                         |
+| f               | toggle fullscreen                           |
+| t               | split focused block automatically           |
+| s/v             | split focused block horizontally/vertically |
+| [ / ]           | resize focused block                        |
+| h/j/k/l         | focus                                       |
+| Shift + h/j/k/l | move block                                  |
+
+### Workspace
+
+| Key       | Operation                    |
+| --------- | ---------------------------- |
+| Ctrl + t  | create new workspace         |
+| Ctrl + w  | close current workspace      |
+| 0-9       | switch to specific workspace |
+| Alt + ←/→ | switch workspace             |
 
 ## Quickstart
 

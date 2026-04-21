@@ -127,7 +127,7 @@ fn split(
     count: &mut usize,
     dir: Direction,
 ) {
-    if let Ok(id) = layout.split_focused(dir) {
+    if let Ok(id) = layout.split_focused(Some(dir)) {
         labels.insert(
             id,
             (

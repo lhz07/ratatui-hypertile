@@ -76,10 +76,16 @@ pub(super) fn compute_recursive(
     area: Rect,
     cache: &mut Vec<(PaneId, Rect)>,
     gap: u16,
+    full: Option<PaneId>,
+    full_area: Rect,
 ) {
     match node {
         Node::Pane(id) => {
-            let rect = if gap > 0 {
+            let rect = if let Some(full_id) = full
+                && full_id == *id
+            {
+                full_area
+            } else if gap > 0 {
                 shrink_rect(area, gap)
             } else {
                 area
@@ -94,8 +100,8 @@ pub(super) fn compute_recursive(
         } => {
             let ratio = normalize_ratio(*ratio);
             let (first_area, second_area) = split_rect(area, *direction, ratio);
-            compute_recursive(first, first_area, cache, gap);
-            compute_recursive(second, second_area, cache, gap);
+            compute_recursive(first, first_area, cache, gap, full, full_area);
+            compute_recursive(second, second_area, cache, gap, full, full_area);
         }
     }
 }

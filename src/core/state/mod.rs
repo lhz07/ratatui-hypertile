@@ -19,6 +19,7 @@ use std::collections::HashMap;
 pub struct HypertileState {
     root: Node,
     focused_path: Vec<usize>,
+    full_pane: Option<PaneId>,
     pane_paths: HashMap<PaneId, Vec<usize>>,
     pane_ids_preorder: Vec<PaneId>,
     layout_cache: Vec<(PaneId, Rect)>,
@@ -46,6 +47,7 @@ impl HypertileState {
         Self {
             root: Node::Pane(PaneId::ROOT),
             focused_path: vec![],
+            full_pane: None,
             pane_paths,
             pane_ids_preorder: vec![PaneId::ROOT],
             layout_cache: Vec::new(),
@@ -70,6 +72,10 @@ impl HypertileState {
         self.rebuild_pane_index();
         self.invalidate_layout_cache();
         Ok(())
+    }
+
+    pub fn is_full(&self) -> bool {
+        self.full_pane.is_some()
     }
 
     pub fn allocate_pane_id(&mut self) -> PaneId {
@@ -102,7 +108,14 @@ impl HypertileState {
         }
 
         self.layout_cache.clear();
-        compute_recursive(&self.root, area, &mut self.layout_cache, self.gap);
+        compute_recursive(
+            &self.root,
+            area,
+            &mut self.layout_cache,
+            self.gap,
+            self.full_pane,
+            area,
+        );
         self.layout_cache.sort_unstable_by_key(|(id, _)| *id);
 
         self.sorted_panes.clear();

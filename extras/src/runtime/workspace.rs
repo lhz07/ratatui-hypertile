@@ -1,16 +1,16 @@
 use ratatui::prelude::*;
 use ratatui_hypertile::{EventOutcome, HypertileEvent, KeyCode, Modifiers};
-use std::time::{Duration, Instant};
-
-use crate::{
-    AnimationConfig,
-    runtime::animation::{SpaceAnimation, SpaceTransitions},
+use std::{
+    borrow::Cow,
+    time::{Duration, Instant},
 };
+
+use crate::{AnimationConfig, runtime::animation::SpaceAnimation};
 
 use super::HypertileRuntime;
 
 pub struct Tab {
-    label: String,
+    label: Option<String>,
     pub runtime: HypertileRuntime,
 }
 
@@ -21,7 +21,8 @@ pub struct Tab {
 /// keys for tab management and forwards everything else to the active tab.
 pub struct WorkspaceRuntime {
     /// offset, old_active, new_active
-    animation: SpaceTransitions,
+    animation: Option<SpaceAnimation>,
+    area: Option<Rect>,
     ani_config: AnimationConfig,
     tabs: Vec<Tab>,
     active: usize,
@@ -53,12 +54,13 @@ impl WorkspaceRuntime {
     pub fn new(factory: impl Fn() -> HypertileRuntime + 'static) -> Self {
         let first = factory();
         Self {
-            animation: SpaceTransitions::default(),
+            animation: None,
             ani_config: AnimationConfig::default(),
             tabs: vec![Tab {
-                label: "1".to_string(),
+                label: None,
                 runtime: first,
             }],
+            area: None,
             active: 0,
             factory: Box::new(factory),
         }
@@ -74,9 +76,8 @@ impl WorkspaceRuntime {
 
     /// Mirrors [`HypertileRuntime::next_frame_in`] for the active tab.
     pub fn next_frame_in(&self) -> Option<Duration> {
-        if let Some(dur) = self
-            .animation
-            .next_frame_in(Instant::now(), self.ani_config.frame_interval)
+        if let Some(ani) = &self.animation
+            && let Some(dur) = ani.next_frame_in(Instant::now(), self.ani_config.frame_interval)
         {
             Some(dur)
         } else {
@@ -92,18 +93,26 @@ impl WorkspaceRuntime {
         self.active
     }
 
-    pub fn tab_labels(&self) -> impl Iterator<Item = (&str, bool)> {
-        self.tabs
-            .iter()
-            .enumerate()
-            .map(move |(i, tab)| (tab.label.as_str(), i == self.active))
+    pub fn tab_labels(&self) -> impl Iterator<Item = (Cow<'_, str>, bool)> {
+        self.tabs.iter().enumerate().map(move |(i, tab)| {
+            (
+                if let Some(name) = &tab.label {
+                    name.as_str().into()
+                } else {
+                    (i + 1).to_string().into()
+                },
+                i == self.active,
+            )
+        })
     }
 
     /// Adds a new tab and switches to it.
     pub fn new_tab(&mut self) {
-        let label = (self.tabs.len() + 1).to_string();
         let runtime = (self.factory)();
-        self.tabs.push(Tab { label, runtime });
+        self.tabs.push(Tab {
+            label: None,
+            runtime,
+        });
         self.active = self.tabs.len() - 1;
     }
 
@@ -120,37 +129,48 @@ impl WorkspaceRuntime {
         }
     }
 
-    /// Wraps around.
     pub fn next_tab(&mut self) {
-        let new = (self.active + 1) % self.tabs.len();
-        if new == self.active {
+        if self.active + 1 >= self.tabs.len() {
             return;
         }
-        self.animation.push(SpaceAnimation::new(
-            Duration::from_secs(5),
-            self.active,
-            new,
-        ));
+        let new = self.active + 1;
+        self.start_animation(new);
         self.active = new;
     }
 
-    /// Wraps around.
     pub fn prev_tab(&mut self) {
-        let new = (self.active + self.tabs.len() - 1) % self.tabs.len();
+        let new = self.active.saturating_sub(1);
         if new == self.active {
             return;
         }
-        self.animation.push(SpaceAnimation::new(
-            Duration::from_secs(5),
-            self.active,
-            new,
-        ));
+        self.start_animation(new);
         self.active = new;
+    }
+
+    fn start_animation(&mut self, new: usize) {
+        match &mut self.animation {
+            Some(ani) => {
+                ani.push_switch(new);
+            }
+            None => {
+                let Some(area) = self.area else {
+                    return;
+                };
+                let ani = SpaceAnimation::new(
+                    self.ani_config.duration,
+                    area,
+                    self.active as u16,
+                    new as u16,
+                );
+                self.animation = Some(ani);
+            }
+        }
     }
 
     /// Does nothing if the index is out of range.
     pub fn go_to_tab(&mut self, index: usize) {
-        if index < self.tabs.len() {
+        if index < self.tabs.len() && index != self.active {
+            self.start_animation(index);
             self.active = index;
         }
     }
@@ -158,7 +178,7 @@ impl WorkspaceRuntime {
     /// Does nothing if the index is out of range.
     pub fn rename_tab(&mut self, index: usize, label: String) {
         if let Some(tab) = self.tabs.get_mut(index) {
-            tab.label = label;
+            tab.label = Some(label);
         }
     }
 
@@ -179,43 +199,96 @@ impl WorkspaceRuntime {
     /// are reserved for tab management. Everything else goes to the active
     /// runtime.
     pub fn handle_event(&mut self, event: HypertileEvent) -> EventOutcome {
-        if let HypertileEvent::Key(chord) = &event
-            && chord.modifiers == Modifiers::CTRL
-        {
-            match chord.code {
-                KeyCode::Char('t') => {
-                    self.new_tab();
-                    return EventOutcome::Consumed;
+        if let HypertileEvent::Key(chord) = &event {
+            if chord.modifiers == Modifiers::CTRL {
+                match chord.code {
+                    KeyCode::Char('t') => {
+                        self.new_tab();
+                        return EventOutcome::Consumed;
+                    }
+                    KeyCode::Char('w') => {
+                        self.close_tab(self.active);
+                        return EventOutcome::Consumed;
+                    }
+                    KeyCode::Char('n') | KeyCode::Right => {
+                        self.next_tab();
+                        return EventOutcome::Consumed;
+                    }
+                    KeyCode::Char('p') | KeyCode::Left => {
+                        self.prev_tab();
+                        return EventOutcome::Consumed;
+                    }
+
+                    _ => (),
                 }
-                KeyCode::Char('w') => {
-                    self.close_tab(self.active);
-                    return EventOutcome::Consumed;
+            }
+            if chord.modifiers == Modifiers::ALT {
+                match chord.code {
+                    KeyCode::Right => {
+                        self.next_tab();
+                        return EventOutcome::Consumed;
+                    }
+                    KeyCode::Left => {
+                        self.prev_tab();
+                        return EventOutcome::Consumed;
+                    }
+
+                    _ => (),
                 }
-                KeyCode::Char('n') | KeyCode::Right => {
-                    self.next_tab();
-                    return EventOutcome::Consumed;
+            }
+            if chord.modifiers == Modifiers::NONE {
+                match chord.code {
+                    KeyCode::Char(ch) if ch.is_ascii_digit() => {
+                        let mut i = ch as usize - '0' as usize;
+                        if i == 0 {
+                            i = 9;
+                        } else {
+                            i -= 1;
+                        }
+                        let base = self.active / 10 * 10;
+                        self.go_to_tab(base + i);
+                        return EventOutcome::Consumed;
+                    }
+                    _ => (),
                 }
-                KeyCode::Char('p') | KeyCode::Left => {
-                    self.prev_tab();
-                    return EventOutcome::Consumed;
-                }
-                _ => {}
             }
         }
-        if let Some(first) = self.animation.old_space()
+        if let Some(ani) = &self.animation
+            && !ani.is_finished(Instant::now())
             && let HypertileEvent::Tick = event
         {
-            self.tabs[first].runtime.handle_event(event);
+            let (left, right) = ani.get_workspaces();
+            if left != self.active
+                && let Some(tab) = self.tabs.get_mut(left)
+            {
+                tab.runtime.handle_event(event);
+            }
+            if right != self.active
+                && let Some(tab) = self.tabs.get_mut(right)
+            {
+                tab.runtime.handle_event(event);
+            }
         }
         self.tabs[self.active].runtime.handle_event(event)
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
-        if !self.animation.is_finished() {
-            self.animation.display_buf(area, &mut self.tabs, buf);
-        } else {
-            self.tabs[self.active].runtime.render(area, buf);
+        match &mut self.area {
+            Some(a) if a.width != area.width => {
+                *a = area;
+                self.animation.take();
+            }
+            _ => self.area = Some(area),
         }
+        if let Some(ani) = &mut self.animation {
+            if !ani.is_finished(Instant::now()) {
+                ani.display_spaces(&mut self.tabs, buf);
+                return;
+            } else {
+                self.animation.take();
+            }
+        }
+        self.tabs[self.active].runtime.render(area, buf);
     }
 }
 

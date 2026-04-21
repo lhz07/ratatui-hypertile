@@ -4,7 +4,7 @@ use super::types::AnimationConfig;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui_hypertile::PaneId;
-use std::collections::{HashMap, VecDeque};
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 /// Drives the per-pane slide animation for `MoveFocused` actions.
@@ -222,117 +222,73 @@ fn copy_with_offset(src: &Buffer, dst: &mut Buffer, screen_area: Rect, offset_x:
     }
 }
 
-fn draw_workspace_transition(
-    area: Rect,
-    progress: f32,
-    offset: f32,
-    direction: AniDirection,
-    old: &Buffer,
-    new: &Buffer,
-    main_buffer: &mut Buffer,
-) {
-    let width = area.width as f32;
-    let offset_a;
-    let offset_b;
-    match direction {
-        AniDirection::Left => {
-            offset_a = (-width * progress + offset) as i32;
-            offset_b = (width * (1.0 - progress) - offset) as i32;
-        }
-        AniDirection::Right => {
-            offset_a = (width * progress + offset) as i32;
-            offset_b = (-width * (1.0 - progress) + offset) as i32;
-        }
-    }
-
-    copy_with_offset(&old, main_buffer, area, offset_a);
-    copy_with_offset(&new, main_buffer, area, offset_b);
-}
-
-#[derive(Debug, Default)]
-pub struct SpaceTransitions {
-    transitions: VecDeque<SpaceAnimation>,
-}
-
-impl SpaceTransitions {
-    pub fn next_frame_in(&self, now: Instant, frame_interval: Duration) -> Option<Duration> {
-        let first = self.transitions.front()?;
-        first.next_frame_in(now, frame_interval)
-    }
-    pub fn is_finished(&self) -> bool {
-        self.transitions.is_empty()
-    }
-    pub fn old_space(&self) -> Option<usize> {
-        Some(self.transitions.front()?.from)
-    }
-    pub fn push(&mut self, mut ani: SpaceAnimation) {
-        if self.transitions.is_empty() {
-            self.transitions.push_back(ani);
-        } else if self.transitions.len() == 1 {
-            let first = &mut self.transitions[0];
-            if first.direction != ani.direction {
-                ani.record_progress = first.progress(Instant::now());
-                *first = ani;
-            } else {
-                self.transitions.push_back(ani);
-            }
-        }
-    }
-    pub fn display_buf(&mut self, area: Rect, tabs: &mut [Tab], main_buffer: &mut Buffer) {
-        if let Some(first) = self.transitions.front_mut() {
-            let progress = first.progress(Instant::now());
-            let mut buf_old = Buffer::empty(area);
-            tabs[first.from].runtime.render(area, &mut buf_old);
-            let mut buf_new = Buffer::empty(area);
-            tabs[first.to].runtime.render(area, &mut buf_new);
-            draw_workspace_transition(
-                area,
-                progress,
-                area.width as f32 * first.record_progress,
-                first.direction,
-                &buf_old,
-                &buf_new,
-                main_buffer,
-            );
-            if first.is_finished(Instant::now()) {
-                self.transitions.pop_front();
-            }
-        }
-    }
-}
-
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum AniDirection {
-    Left,
-    Right,
-}
-
 #[derive(Debug)]
 pub struct SpaceAnimation {
     started_at: Instant,
     duration: Duration,
-    from: usize,
-    to: usize,
-    direction: AniDirection,
-    record_progress: f32,
+    area: Rect,
+    pub target_x: f32,
+    pub start_x: f32,
 }
 
 impl SpaceAnimation {
-    pub fn new(duration: Duration, from: usize, to: usize) -> Self {
+    pub fn new(duration: Duration, area: Rect, from: u16, to: u16) -> Self {
         Self {
             started_at: Instant::now(),
+            start_x: (from * area.width) as f32,
+            target_x: (to * area.width) as f32,
             duration,
-            from,
-            to,
-            direction: if from < to {
-                AniDirection::Left
-            } else {
-                AniDirection::Right
-            },
-            record_progress: 0.0,
+            area,
         }
     }
-    fn is_finished(&self, now: Instant) -> bool {
+    pub fn get_workspaces(&self) -> (usize, usize) {
+        let current_x = self.get_current_camera_x();
+        let left = (current_x / self.area.width as f32).floor() as usize;
+        (left, left + 1)
+    }
+
+    pub fn push_switch(&mut self, to: usize) {
+        let now = Instant::now();
+
+        self.start_x = self.get_current_camera_x();
+        self.target_x = to as f32 * self.area.width as f32;
+        self.started_at = now;
+    }
+    pub fn display_spaces(&mut self, tabs: &mut [Tab], main_buffer: &mut Buffer) {
+        let area = self.area;
+        let width = self.area.width as f32;
+        let current_x = self.get_current_camera_x();
+
+        // left workspace index
+        let index_a = (current_x / width).floor() as usize;
+        // right index
+        let index_b = index_a + 1;
+        // calculate offsets
+        let mut offset_a = (index_a as f32 * width - current_x) as i32;
+        let mut offset_b = (index_b as f32 * width - current_x) as i32;
+        if offset_a == 0 {
+            offset_b += 1;
+        } else {
+            offset_a -= 1;
+        }
+        // render left
+        if let Some(tab_a) = tabs.get_mut(index_a) {
+            let mut buf_a = Buffer::empty(area);
+            tab_a.runtime.render(area, &mut buf_a);
+            copy_with_offset(&buf_a, main_buffer, area, offset_a);
+        }
+        // render right
+        if let Some(tab_b) = tabs.get_mut(index_b) {
+            let mut buf_b = Buffer::empty(area);
+            tab_b.runtime.render(area, &mut buf_b);
+            copy_with_offset(&buf_b, main_buffer, area, offset_b);
+        }
+    }
+
+    pub fn get_current_camera_x(&self) -> f32 {
+        self.start_x + (self.target_x - self.start_x) * self.progress(Instant::now())
+    }
+    pub fn is_finished(&self, now: Instant) -> bool {
         now.saturating_duration_since(self.started_at) >= self.duration
     }
 
@@ -341,7 +297,7 @@ impl SpaceAnimation {
         ease_out_cubic(elapsed.as_secs_f32() / self.duration.as_secs_f32()).clamp(0.0, 1.0)
     }
 
-    fn next_frame_in(&self, now: Instant, frame_interval: Duration) -> Option<Duration> {
+    pub fn next_frame_in(&self, now: Instant, frame_interval: Duration) -> Option<Duration> {
         let elapsed = now.saturating_duration_since(self.started_at);
         if elapsed >= self.duration {
             return None;

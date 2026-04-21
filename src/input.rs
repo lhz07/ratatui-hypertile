@@ -120,6 +120,7 @@ pub enum MoveScope {
 pub enum HypertileAction {
     FocusNext,
     FocusPrev,
+    FocusFull,
     FocusDirection {
         direction: Direction,
         towards: Towards,

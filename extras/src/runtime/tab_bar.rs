@@ -28,7 +28,7 @@ impl TabBar {
             items: workspace
                 .tab_labels()
                 .map(|(label, active)| TabBarItem {
-                    label: label.to_owned(),
+                    label: label.into_owned(),
                     is_active: active,
                 })
                 .collect(),

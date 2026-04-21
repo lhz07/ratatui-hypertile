@@ -1,5 +1,5 @@
 use crate::core::helpers::{node_at_path, node_mut_at_path, normalize_ratio};
-use crate::core::{Node, PaneId, StateError};
+use crate::core::{CELL_RATIO, Node, PaneId, StateError};
 use ratatui::layout::Direction;
 
 use super::HypertileState;
@@ -7,13 +7,13 @@ use super::HypertileState;
 impl HypertileState {
     /// [`split_with_ratio`](Self::split_with_ratio) with a 50/50 split.
     pub fn split(&mut self, direction: Direction, new_id: PaneId) -> Result<(), StateError> {
-        self.split_with_ratio(direction, new_id, 0.5)
+        self.split_ratio_with_direction(direction, new_id, 0.5)
     }
 
     /// Splits the focused pane and inserts `new_id` as the new sibling.
     ///
     /// Uses `ratio` for the new split and returns an error if `new_id` is already in the tree.
-    pub fn split_with_ratio(
+    pub fn split_ratio_with_direction(
         &mut self,
         direction: Direction,
         new_id: PaneId,
@@ -55,6 +55,11 @@ impl HypertileState {
         }
 
         let removed_id = self.focused_pane().ok_or(StateError::FocusedNodeNotPane)?;
+        if let Some(fid) = self.full_pane
+            && fid == removed_id
+        {
+            self.full_pane.take();
+        }
         let parent_len = self.focused_path.len() - 1;
         let child_idx = self.focused_path[parent_len];
         let sibling_idx = 1 - child_idx;
@@ -86,6 +91,32 @@ impl HypertileState {
         Ok(removed_id)
     }
 
+    pub fn split_ratio(&mut self, new_id: PaneId, ratio: f32) -> Result<(), StateError> {
+        if self.focused_path.is_empty() {
+            self.split_ratio_with_direction(Direction::Horizontal, new_id, ratio)?;
+            return Ok(());
+        }
+        let node = self.focused_pane().ok_or(StateError::FocusedNodeNotPane)?;
+        let (_, rect) = self
+            .layout_cache
+            .iter()
+            .find(|(id, _)| *id == node)
+            .ok_or(StateError::UnknownPaneId(node))?;
+        let direction = if rect.width as f64 >= rect.height as f64 * *CELL_RATIO {
+            Direction::Horizontal
+        } else {
+            Direction::Vertical
+        };
+        // let parent_path = &self.focused_path[..self.focused_path.len() - 1];
+        // let parent = node_mut_at_path(&mut self.root, parent_path)?;
+
+        // let Node::Split { direction, .. } = parent else {
+        //     return Err(StateError::ParentNodeNotSplit);
+        // };
+        // let direction = direction.perpendicular();
+        self.split_ratio_with_direction(direction, new_id, ratio)
+    }
+
     /// Adjusts the parent split ratio by `delta`.
     ///
     /// Returns `Ok(true)` if the ratio changed, or `Ok(false)` if there was nothing to change.
@@ -112,6 +143,21 @@ impl HypertileState {
         }
 
         *ratio = next;
+        self.invalidate_layout_cache();
+        Ok(true)
+    }
+    pub fn toggle_focused_full(&mut self) -> Result<bool, StateError> {
+        if self.sorted_panes.len() == 1 {
+            return Ok(false);
+        }
+        if self.full_pane.is_some() {
+            self.full_pane.take();
+            self.invalidate_layout_cache();
+            return Ok(true);
+        }
+
+        let pane = self.focused_pane().ok_or(StateError::FocusedNodeNotPane)?;
+        self.full_pane = Some(pane);
         self.invalidate_layout_cache();
         Ok(true)
     }

@@ -207,7 +207,7 @@ impl HypertileRuntime {
     /// Splits the focused pane and mounts a fresh plugin instance in the new pane.
     pub fn split_focused(
         &mut self,
-        direction: Direction,
+        direction: Option<Direction>,
         plugin_type: &str,
     ) -> Result<PaneId, RuntimeError> {
         let now = Instant::now();
@@ -312,20 +312,25 @@ impl HypertileRuntime {
     fn handle_layout_key(&mut self, chord: KeyChord) -> Result<EventOutcome, RuntimeError> {
         match self.default_layout_action(chord) {
             Some(RuntimeAction::Core(action)) => Ok(self.apply_core_action(action)),
-            Some(RuntimeAction::SplitDefault(direction)) => self.handle_split_shortcut(direction),
-            Some(RuntimeAction::OpenPalette) => self.open_palette(),
+            Some(RuntimeAction::SplitDirection(direction)) if !self.core.state().is_full() => {
+                self.handle_split_shortcut(Some(direction))
+            }
+            Some(RuntimeAction::SplitDefault) if !self.core.state().is_full() => {
+                self.handle_split_shortcut(None)
+            }
+            Some(RuntimeAction::OpenPalette) if !self.core.state().is_full() => self.open_palette(),
             Some(RuntimeAction::InteractFocused) => self.handle_interact_focused(),
             Some(RuntimeAction::EnterPluginInput) => {
                 self.mode = InputMode::PluginInput;
                 Ok(EventOutcome::Consumed)
             }
-            None => Ok(EventOutcome::Ignored),
+            _ => Ok(EventOutcome::Ignored),
         }
     }
 
     fn handle_split_shortcut(
         &mut self,
-        direction: Direction,
+        direction: Option<Direction>,
     ) -> Result<EventOutcome, RuntimeError> {
         match self.split_behavior {
             SplitBehavior::DefaultPlugin => {
@@ -392,7 +397,9 @@ impl HypertileRuntime {
         self.animation_config.enabled
             && matches!(
                 action,
-                HypertileAction::MoveFocused { .. } | HypertileAction::CloseFocused
+                HypertileAction::MoveFocused { .. }
+                    | HypertileAction::CloseFocused
+                    | HypertileAction::FocusFull
             )
             && self.animation_state.last_area().is_some()
     }
