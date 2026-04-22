@@ -8,7 +8,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Trait implemented by pane-local plugins stored in [`Registry`].
 pub trait HypertilePlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, is_focused: bool);
+    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool);
 
     /// Return [`EventOutcome::Consumed`] to mark it handled.
     fn on_event(&mut self, _event: &HypertileEvent) -> EventOutcome {
@@ -30,9 +30,18 @@ pub trait HypertilePlugin {
     }
 }
 
-struct PluginInstance {
+pub struct PluginInstance {
     plugin_type: String,
     plugin: Box<dyn HypertilePlugin>,
+}
+
+impl PluginInstance {
+    pub fn plugin_type(&self) -> &str {
+        &self.plugin_type
+    }
+    pub fn plugin(&mut self) -> &mut Box<dyn HypertilePlugin> {
+        &mut self.plugin
+    }
 }
 
 /// Stores plugin factories and mounted plugin instances keyed by pane id.
@@ -164,6 +173,10 @@ impl Registry {
         self.instances
             .get_mut(&pane_id)
             .map(move |instance| instance.plugin.as_mut())
+    }
+
+    pub fn plugin_instance_mut(&mut self, pane_id: PaneId) -> Option<&mut PluginInstance> {
+        self.instances.get_mut(&pane_id)
     }
 
     pub fn instance_count(&self) -> usize {

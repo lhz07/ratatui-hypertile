@@ -35,9 +35,7 @@ mod widget;
 
 pub use crate::core::{PaneId, StateError};
 pub use crate::engine::{Hypertile, HypertileBuilder};
-pub use crate::input::{
-    EventOutcome, HypertileAction, HypertileEvent, KeyChord, KeyCode, Modifiers, MoveScope, Towards,
-};
+pub use crate::input::{EventOutcome, HypertileAction, HypertileEvent, MoveScope, Towards};
 pub use crate::types::{PaneSnapshot, SplitPolicy};
 pub use crate::widget::HypertileWidget;
 
@@ -53,7 +51,6 @@ pub mod raw {
 pub mod prelude {
     pub use crate::{
         EventOutcome, Hypertile, HypertileAction, HypertileBuilder, HypertileEvent,
-        HypertileWidget, KeyChord, KeyCode, Modifiers, MoveScope, PaneId, PaneSnapshot,
-        SplitPolicy, StateError, Towards,
+        HypertileWidget, MoveScope, PaneId, PaneSnapshot, SplitPolicy, StateError, Towards,
     };
 }

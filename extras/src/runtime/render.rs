@@ -18,10 +18,10 @@ impl HypertileRuntime {
         self.animation_state.remember_area(area);
         self.core.compute_layout(area);
         let focused = self.core.focused_pane();
-        let full = self.core.focused_pane();
+        let full = self.core.state().full_pane();
         let mut full_rect = None;
         let highlight = self.core.state().focus_highlight();
-        let registry = &self.registry;
+        let registry = &mut self.registry;
         let border_config = &self.border_config;
         let panes = self
             .animation_state
@@ -36,8 +36,11 @@ impl HypertileRuntime {
             }
             Clear.render(rect, buf);
             let is_focused = highlight && Some(pane_id) == focused;
-            if let Some(plugin) = registry.plugin(pane_id) {
-                plugin.render(rect, buf, is_focused);
+            if let Some(plugin_instance) = registry.plugin_instance_mut(pane_id) {
+                // if plugin_instance.plugin_type() != "logs" {
+                //     log::info!("render {}", plugin_instance.plugin_type());
+                // }
+                plugin_instance.plugin().render(rect, buf, is_focused);
             } else {
                 render_fallback_pane(border_config, pane_id, rect, buf, is_focused);
             }
@@ -47,7 +50,7 @@ impl HypertileRuntime {
         {
             Clear.render(rect, buf);
             let is_focused = highlight && Some(pane_id) == focused;
-            if let Some(plugin) = registry.plugin(pane_id) {
+            if let Some(plugin) = registry.plugin_mut(pane_id) {
                 plugin.render(rect, buf, is_focused);
             } else {
                 render_fallback_pane(border_config, pane_id, rect, buf, is_focused);

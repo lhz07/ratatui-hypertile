@@ -1,5 +1,6 @@
+use crossterm::event::{KeyCode, KeyModifiers};
 use ratatui::prelude::*;
-use ratatui_hypertile::{EventOutcome, HypertileEvent, KeyCode, Modifiers};
+use ratatui_hypertile::{EventOutcome, HypertileEvent};
 use std::{
     borrow::Cow,
     time::{Duration, Instant},
@@ -200,7 +201,7 @@ impl WorkspaceRuntime {
     /// runtime.
     pub fn handle_event(&mut self, event: HypertileEvent) -> EventOutcome {
         if let HypertileEvent::Key(chord) = &event {
-            if chord.modifiers == Modifiers::CTRL {
+            if chord.modifiers == KeyModifiers::CONTROL {
                 match chord.code {
                     KeyCode::Char('t') => {
                         self.new_tab();
@@ -222,7 +223,7 @@ impl WorkspaceRuntime {
                     _ => (),
                 }
             }
-            if chord.modifiers == Modifiers::ALT {
+            if chord.modifiers == KeyModifiers::ALT {
                 match chord.code {
                     KeyCode::Right => {
                         self.next_tab();
@@ -236,7 +237,7 @@ impl WorkspaceRuntime {
                     _ => (),
                 }
             }
-            if chord.modifiers == Modifiers::NONE {
+            if chord.modifiers == KeyModifiers::NONE {
                 match chord.code {
                     KeyCode::Char(ch) if ch.is_ascii_digit() => {
                         let mut i = ch as usize - '0' as usize;
@@ -273,12 +274,15 @@ impl WorkspaceRuntime {
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
+        // update area width if changed
         match &mut self.area {
-            Some(a) if a.width != area.width => {
-                *a = area;
-                self.animation.take();
+            Some(a) => {
+                if a.width != area.width {
+                    *a = area;
+                    self.animation.take();
+                }
             }
-            _ => self.area = Some(area),
+            None => self.area = Some(area),
         }
         if let Some(ani) = &mut self.animation {
             if !ani.is_finished(Instant::now()) {

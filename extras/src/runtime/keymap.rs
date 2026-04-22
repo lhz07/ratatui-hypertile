@@ -1,6 +1,7 @@
 use crate::runtime::HypertileRuntime;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::Direction;
-use ratatui_hypertile::{HypertileAction, KeyChord, KeyCode, Modifiers, Towards};
+use ratatui_hypertile::{HypertileAction, Towards};
 
 #[derive(Debug, Clone, PartialEq)]
 pub(super) enum RuntimeAction {
@@ -34,7 +35,7 @@ impl MoveBindings {
 }
 
 impl HypertileRuntime {
-    pub(super) fn default_layout_action(&self, chord: KeyChord) -> Option<RuntimeAction> {
+    pub(super) fn default_layout_action(&self, chord: KeyEvent) -> Option<RuntimeAction> {
         const SHIFT_ARROW_MOVES: [(KeyCode, Direction, Towards); 4] = [
             (KeyCode::Left, Direction::Horizontal, Towards::Start),
             (KeyCode::Right, Direction::Horizontal, Towards::End),
@@ -42,7 +43,7 @@ impl HypertileRuntime {
             (KeyCode::Up, Direction::Vertical, Towards::Start),
         ];
 
-        if self.move_bindings.includes_shift_arrows() && chord.modifiers == Modifiers::SHIFT {
+        if self.move_bindings.includes_shift_arrows() && chord.modifiers == KeyModifiers::SHIFT {
             for &(code, direction, towards) in &SHIFT_ARROW_MOVES {
                 if chord.code == code {
                     return Some(RuntimeAction::Core(HypertileAction::MoveFocused {
@@ -65,8 +66,8 @@ impl HypertileRuntime {
             for &(ch, direction, towards) in &VIM_MOVES {
                 let upper = ch.to_ascii_uppercase();
                 let matches = match (chord.code, chord.modifiers) {
-                    (KeyCode::Char(c), Modifiers::SHIFT) if c == upper || c == ch => true,
-                    (KeyCode::Char(c), Modifiers::NONE) if c == upper => true,
+                    (KeyCode::Char(c), KeyModifiers::SHIFT) if c == upper || c == ch => true,
+                    (KeyCode::Char(c), KeyModifiers::NONE) if c == upper => true,
                     _ => false,
                 };
                 if matches {
@@ -139,10 +140,8 @@ mod tests {
     fn default_move_bindings_include_vim_and_shift_arrows() {
         let runtime = HypertileRuntime::new();
 
-        let shift_arrow = runtime.default_layout_action(KeyChord {
-            code: KeyCode::Left,
-            modifiers: Modifiers::SHIFT,
-        });
+        let shift_arrow =
+            runtime.default_layout_action(KeyEvent::new(KeyCode::Left, KeyModifiers::SHIFT));
         assert!(matches!(
             shift_arrow,
             Some(RuntimeAction::Core(HypertileAction::MoveFocused {
@@ -152,10 +151,8 @@ mod tests {
             }))
         ));
 
-        let vim = runtime.default_layout_action(KeyChord {
-            code: KeyCode::Char('H'),
-            modifiers: Modifiers::SHIFT,
-        });
+        let vim =
+            runtime.default_layout_action(KeyEvent::new(KeyCode::Char('H'), KeyModifiers::SHIFT));
         assert!(matches!(
             vim,
             Some(RuntimeAction::Core(HypertileAction::MoveFocused {

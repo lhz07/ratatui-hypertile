@@ -6,6 +6,7 @@ mod crossterm;
 mod default_plugin;
 mod keymap;
 mod palette;
+pub mod pty;
 mod render;
 mod tab_bar;
 mod types;
@@ -13,17 +14,20 @@ mod widget;
 pub(crate) mod workspace;
 
 use crate::registry::{HypertilePlugin, Registry};
+use ::crossterm::event::{KeyCode, KeyEvent};
 use ratatui::layout::{Direction, Rect};
 use ratatui_hypertile::{
-    EventOutcome, Hypertile as CoreHypertile, HypertileAction, HypertileEvent, KeyChord, KeyCode,
-    PaneId, PaneSnapshot, raw, raw::Node as CoreNode,
+    EventOutcome, Hypertile as CoreHypertile, HypertileAction, HypertileEvent, PaneId,
+    PaneSnapshot, raw, raw::Node as CoreNode,
 };
 use std::collections::HashSet;
+use std::sync::LazyLock;
 use std::time::{Duration, Instant};
+use tokio::task::JoinHandle;
 
 pub use builder::HypertileRuntimeBuilder;
 #[cfg(feature = "crossterm")]
-pub use crossterm::{event_from_crossterm, keychord_from_crossterm};
+pub use crossterm::event_from_crossterm;
 pub use keymap::MoveBindings;
 pub use tab_bar::{TabBar, TabBarItem};
 pub use types::{AnimationConfig, BorderConfig, InputMode, RuntimeError, SplitBehavior};
@@ -34,6 +38,19 @@ use animation::AnimationState;
 use constants::DEFAULT_PLUGIN_TYPE;
 use keymap::RuntimeAction;
 use palette::PaletteState;
+
+use tokio::runtime::Runtime;
+
+static TOKIO_RUNTIME: LazyLock<Runtime> =
+    LazyLock::new(|| Runtime::new().expect("Failed to create Tokio runtime"));
+
+pub fn tokio_spawn<F>(future: F) -> JoinHandle<F::Output>
+where
+    F: Future + Send + 'static,
+    F::Output: Send + 'static,
+{
+    TOKIO_RUNTIME.spawn(future)
+}
 
 /// Ready-made runtime for apps that want tiling plus plugins without building
 /// an event loop from scratch.
@@ -225,9 +242,8 @@ impl HypertileRuntime {
     }
 
     pub fn close_focused(&mut self) -> Result<PaneId, RuntimeError> {
-        let removed_id = self.core.close_focused()?;
+        let removed_id = self.core.focused_pane().unwrap();
         self.registry.remove_plugin_if_exists(removed_id);
-        self.animation_state.clear();
         Ok(removed_id)
     }
 
@@ -284,7 +300,7 @@ impl HypertileRuntime {
             HypertileEvent::Action(action) => Ok(self.apply_core_action(action)),
             HypertileEvent::Tick => Ok(self.registry.broadcast_event(&HypertileEvent::Tick)),
             HypertileEvent::Key(chord) => {
-                if chord.code == KeyCode::Escape && chord.modifiers.is_empty() {
+                if chord.code == KeyCode::Esc && chord.modifiers.is_empty() {
                     if self.mode == InputMode::PluginInput {
                         self.mode = InputMode::Layout;
                         return Ok(EventOutcome::Consumed);
@@ -309,7 +325,7 @@ impl HypertileRuntime {
             .unwrap_or(EventOutcome::Ignored)
     }
 
-    fn handle_layout_key(&mut self, chord: KeyChord) -> Result<EventOutcome, RuntimeError> {
+    fn handle_layout_key(&mut self, chord: KeyEvent) -> Result<EventOutcome, RuntimeError> {
         match self.default_layout_action(chord) {
             Some(RuntimeAction::Core(action)) => Ok(self.apply_core_action(action)),
             Some(RuntimeAction::SplitDirection(direction)) if !self.core.state().is_full() => {
@@ -378,7 +394,9 @@ impl HypertileRuntime {
         if can_animate {
             self.capture_displayed_rects(now);
         }
-
+        if let HypertileAction::CloseFocused = action {
+            let _ = self.close_focused();
+        }
         let outcome = self.core.apply_action(action);
         if !outcome.is_consumed() {
             return outcome;

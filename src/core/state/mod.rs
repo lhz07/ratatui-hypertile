@@ -74,6 +74,10 @@ impl HypertileState {
         Ok(())
     }
 
+    pub fn full_pane(&self) -> Option<PaneId> {
+        self.full_pane
+    }
+
     pub fn is_full(&self) -> bool {
         self.full_pane.is_some()
     }

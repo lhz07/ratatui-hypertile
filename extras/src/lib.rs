@@ -20,8 +20,8 @@ pub use registry::{HypertilePlugin, PluginContext, Registry, RegistryError};
 pub use runtime::{
     AnimationConfig, BorderConfig, HypertileRuntime, HypertileRuntimeBuilder, HypertileView,
     InputMode, ModeIndicator, MoveBindings, RuntimeError, SplitBehavior, TabBar, TabBarItem,
-    WorkspaceAction, WorkspaceRuntime,
+    WorkspaceAction, WorkspaceRuntime, pty,
 };
 
 #[cfg(feature = "crossterm")]
-pub use runtime::{event_from_crossterm, keychord_from_crossterm};
+pub use runtime::event_from_crossterm;

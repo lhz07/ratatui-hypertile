@@ -13,16 +13,17 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use ratatui_hypertile::{EventOutcome, HypertileEvent, KeyCode as HtKeyCode, PaneId};
+use ratatui_hypertile::{EventOutcome, HypertileEvent, PaneId};
 use ratatui_hypertile_extras::{
     AnimationConfig, HypertilePlugin, HypertileRuntime, ModeIndicator, SplitBehavior,
-    WorkspaceRuntime, event_from_crossterm,
+    WorkspaceRuntime, event_from_crossterm, pty::PtyPlugin,
 };
 use std::{
     collections::VecDeque,
     io,
     time::{Duration, Instant},
 };
+use tui_logger::TuiWidgetState;
 
 fn build_runtime() -> HypertileRuntime {
     let mut rt = HypertileRuntime::builder()
@@ -37,18 +38,26 @@ fn build_runtime() -> HypertileRuntime {
         mem: 34,
         tick: 0,
     });
+
     rt.register_plugin_type("logs", || LogsPlugin {
         lines: VecDeque::new(),
+        log_state: TuiWidgetState::new(),
         tick: 0,
     });
     rt.register_plugin_type("editor", || EditorPlugin {
         text: String::new(),
     });
     rt.register_plugin_type("network", || NetworkPlugin { tick: 0 });
+    rt.register_plugin_type("fish", || PtyPlugin::new());
     rt
 }
 
 fn main() -> io::Result<()> {
+    // Set max_log_level to Trace
+    tui_logger::init_logger(log::LevelFilter::Trace).unwrap();
+
+    // Set default level for unknown targets to Trace
+    tui_logger::set_default_level(log::LevelFilter::Trace);
     let mut terminal = ratatui::init();
 
     let mut workspace = WorkspaceRuntime::new(build_runtime);
@@ -106,9 +115,7 @@ fn run(
             if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
                 return Ok(());
             }
-            if let Some(ev) = event_from_crossterm(key) {
-                workspace.handle_event(ev);
-            }
+            workspace.handle_event(event_from_crossterm(key));
         }
 
         if last_tick.elapsed() >= tick_rate {
@@ -153,7 +160,7 @@ struct MonitorPlugin {
 }
 
 impl HypertilePlugin for MonitorPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
         let mut lines = vec![Line::from("")];
         for (i, &usage) in self.cpu.iter().enumerate() {
             let filled = usage as usize * 20 / 100;
@@ -213,36 +220,32 @@ const LOG_ENTRIES: &[(&str, Color)] = &[
 
 struct LogsPlugin {
     lines: VecDeque<(String, Color)>,
+    log_state: TuiWidgetState,
     tick: u64,
 }
 
 impl HypertilePlugin for LogsPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, is_focused: bool) {
-        let text: Vec<Line> = self
-            .lines
-            .iter()
-            .map(|(msg, color)| Line::styled(msg.as_str(), Style::default().fg(*color)))
-            .collect();
-        Paragraph::new(text)
-            .block(pane_block("Logs", is_focused, Color::Yellow))
-            .wrap(Wrap { trim: false })
-            .render(area, buf);
+    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+        let logs = tui_logger::TuiLoggerWidget::default()
+            .block(pane_block("Logs", is_focused, Color::Blue))
+            .state(&self.log_state);
+        logs.render(area, buf);
     }
 
     fn on_event(&mut self, event: &HypertileEvent) -> EventOutcome {
         if !matches!(event, HypertileEvent::Tick) {
             return EventOutcome::Ignored;
         }
-        self.tick += 1;
-        let (msg, color) = LOG_ENTRIES[self.tick as usize % LOG_ENTRIES.len()];
-        let h = (self.tick / 3600) % 24;
-        let m = (self.tick / 60) % 60;
-        let s = self.tick % 60;
-        if self.lines.len() >= 100 {
-            self.lines.pop_front();
-        }
-        self.lines
-            .push_back((format!("{h:02}:{m:02}:{s:02} {msg}"), color));
+        // self.tick += 1;
+        // let (msg, color) = LOG_ENTRIES[self.tick as usize % LOG_ENTRIES.len()];
+        // let h = (self.tick / 3600) % 24;
+        // let m = (self.tick / 60) % 60;
+        // let s = self.tick % 60;
+        // if self.lines.len() >= 100 {
+        //     self.lines.pop_front();
+        // }
+        // self.lines
+        //     .push_back((format!("{h:02}:{m:02}:{s:02} {msg}"), color));
         EventOutcome::Consumed
     }
 }
@@ -252,7 +255,7 @@ struct EditorPlugin {
 }
 
 impl HypertilePlugin for EditorPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
         Paragraph::new(format!("{}\u{2588}", self.text))
             .block(pane_block("Editor", is_focused, Color::Magenta))
             .wrap(Wrap { trim: false })
@@ -264,15 +267,15 @@ impl HypertilePlugin for EditorPlugin {
             return EventOutcome::Ignored;
         };
         match key.code {
-            HtKeyCode::Char(ch) => {
+            KeyCode::Char(ch) => {
                 self.text.push(ch);
                 EventOutcome::Consumed
             }
-            HtKeyCode::Enter => {
+            KeyCode::Enter => {
                 self.text.push('\n');
                 EventOutcome::Consumed
             }
-            HtKeyCode::Backspace => {
+            KeyCode::Backspace => {
                 self.text.pop();
                 EventOutcome::Consumed
             }
@@ -286,7 +289,7 @@ struct NetworkPlugin {
 }
 
 impl HypertilePlugin for NetworkPlugin {
-    fn render(&self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
         let t = self.tick;
         let conns = 800 + (t * 17 % 120) as u32;
         let rps = 1100 + (t * 31 % 400) as u32;

@@ -55,6 +55,7 @@ impl HypertileState {
         }
 
         let removed_id = self.focused_pane().ok_or(StateError::FocusedNodeNotPane)?;
+
         if let Some(fid) = self.full_pane
             && fid == removed_id
         {
