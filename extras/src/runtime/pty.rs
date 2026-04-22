@@ -1,5 +1,6 @@
 use std::{
     io::{self, Write},
+    sync::Arc,
     time::Duration,
 };
 
@@ -40,7 +41,8 @@ pub struct MountedPty {
     input_tx: mpsc::Sender<InputMsg>,
 }
 
-struct PtyFd(AsyncFd<i32>);
+#[derive(Clone)]
+struct PtyFd(Arc<AsyncFd<i32>>);
 
 impl PtyFd {
     async fn read(&self, buf: &mut [u8]) -> io::Result<usize> {
@@ -125,15 +127,15 @@ impl MountedPty {
         }
     }
     pub fn create(area: Rect) -> anyhow::Result<Self> {
-        let rows = 24;
-        let cols = 80;
+        let rows = area.height.max(MIN_ROW);
+        let cols = area.width.max(MIN_COL);
         let pty = NativePtySystem::default();
         let root = pty.openpty(PtySize {
             rows,
             cols,
             ..Default::default()
         })?;
-        let child = root.slave.spawn_command(CommandBuilder::new("zsh"))?;
+        let child = root.slave.spawn_command(CommandBuilder::new("fish"))?;
         let fd = root.master.as_raw_fd().expect("valid on macOS");
         unsafe {
             // set nonblocking
@@ -144,11 +146,27 @@ impl MountedPty {
         }
         let (render_tx, mut render_rx) = mpsc::channel::<RenderMsg>(10);
         let (input_tx, mut input_rx) = mpsc::channel::<InputMsg>(100);
-        std::thread::sleep(Duration::from_secs(3));
         tokio_spawn(async move {
             let res: Result<(), anyhow::Error> = async {
                 let async_fd = AsyncFd::new(fd)?;
-                let pty_fd = PtyFd(async_fd);
+                let pty_fd = PtyFd(Arc::new(async_fd));
+                let pty_fd_write = pty_fd.clone();
+                tokio_spawn(async move {
+                    let res: Result<(), anyhow::Error> = async {
+                        loop {
+                            let msg = input_rx
+                                .recv()
+                                .await
+                                .ok_or(anyhow::anyhow!("recv input msg"))?;
+                            log::info!("write key");
+                            pty_fd_write.write(&msg.event).await?;
+                        }
+                    }
+                    .await;
+                    if let Err(e) = res {
+                        log::error!("pty input: {e}")
+                    }
+                });
                 let mut parser = vt100::Parser::new(rows, cols, 0);
                 let mut buf = [0; 8192];
                 loop {
@@ -186,24 +204,6 @@ impl MountedPty {
                 log::error!("pty output: {e}")
             }
         });
-        tokio_spawn(async move {
-            let res: Result<(), anyhow::Error> = async {
-                let async_fd = AsyncFd::new(fd)?;
-                let pty_fd = PtyFd(async_fd);
-                loop {
-                    let msg = input_rx
-                        .recv()
-                        .await
-                        .ok_or(anyhow::anyhow!("recv input msg"))?;
-                    log::info!("write key");
-                    pty_fd.write(&msg.event).await?;
-                }
-            }
-            .await;
-            if let Err(e) = res {
-                log::error!("pty input: {e}")
-            }
-        });
 
         Ok(Self {
             root,
@@ -237,15 +237,18 @@ impl HypertilePlugin for PtyPlugin {
         ratatui_hypertile::EventOutcome::Ignored
     }
     fn render(&mut self, area: Rect, buf: &mut ratatui::prelude::Buffer, is_focused: bool) {
+        let block = pane_block("Terminal", is_focused, Color::Blue);
         let pty = match &mut self.mounted {
-            Some(p) => p,
-            None => match MountedPty::create(area) {
+            Some(pty) => {
+                pty.resize(block.inner(area));
+                pty
+            }
+            None => match MountedPty::create(block.inner(area)) {
                 Ok(mounted) => self.mounted.insert(mounted),
                 // TODO: Don't panic here, add a log instead.
                 Err(e) => panic!("{e}"),
             },
         };
-        // pty.resize(area);
         let (msg, rx) = RenderMsg::new();
         if let Err(_) = pty.render_tx.try_send(msg) {
             return;
@@ -253,14 +256,12 @@ impl HypertilePlugin for PtyPlugin {
         let Ok(screen) = rx.blocking_recv() else {
             return;
         };
-        let pseudo_term = PseudoTerminal::new(&screen)
-            .block(pane_block("Terminal", is_focused, Color::Blue))
-            .style(
-                Style::default()
-                    .fg(Color::White)
-                    .bg(Color::Black)
-                    .add_modifier(Modifier::BOLD),
-            );
+        let pseudo_term = PseudoTerminal::new(&screen).block(block).style(
+            Style::default()
+                .fg(Color::White)
+                .bg(Color::Black)
+                .add_modifier(Modifier::BOLD),
+        );
         // log::info!("render term");
         pseudo_term.render(area, buf);
         // render_screen_to_buffer(&screen, area, buf);
@@ -358,5 +359,6 @@ async fn test_fd() -> anyhow::Result<()> {
         }
     }
     let async_fd = AsyncFd::new(fd)?;
+    let async_fd1 = AsyncFd::new(fd)?;
     Ok(())
 }
