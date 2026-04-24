@@ -133,12 +133,13 @@ impl AnimationState {
     }
 
     /// Moving panes are appended last so they paint on top.
+    /// returns whether the animation is active
     pub(super) fn display_rects<I>(
         &mut self,
         area: Rect,
         panes: I,
         now: Instant,
-    ) -> &[(PaneId, Rect)]
+    ) -> (&[(PaneId, Rect)], bool)
     where
         I: IntoIterator<Item = (PaneId, Rect)>,
     {
@@ -147,13 +148,13 @@ impl AnimationState {
 
         let Some(active) = self.active.as_ref() else {
             self.display_panes.extend(panes);
-            return self.display_panes.as_slice();
+            return (self.display_panes.as_slice(), false);
         };
 
         if active.area != area || active.is_finished(now) {
             self.active = None;
             self.display_panes.extend(panes);
-            return self.display_panes.as_slice();
+            return (self.display_panes.as_slice(), false);
         }
 
         let progress = active.progress(now);
@@ -167,7 +168,7 @@ impl AnimationState {
         }
 
         self.display_panes.extend_from_slice(&self.moving_panes);
-        self.display_panes.as_slice()
+        (self.display_panes.as_slice(), true)
     }
 }
 
@@ -446,7 +447,9 @@ mod tests {
         );
 
         assert_eq!(
-            state.display_rects(area, [(pane_id, Rect::new(30, 0, 10, 5))], restart_at),
+            state
+                .display_rects(area, [(pane_id, Rect::new(30, 0, 10, 5))], restart_at)
+                .0,
             &[(pane_id, Rect::new(18, 0, 10, 5))]
         );
     }

@@ -1,4 +1,4 @@
-use crate::runtime::HypertileRuntime;
+use crate::{InputMode, runtime::HypertileRuntime};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -6,7 +6,7 @@ use ratatui::{
     widgets::{Block, Borders, Clear, List, ListItem, ListState, StatefulWidget, Widget},
 };
 use ratatui_hypertile::PaneId;
-use std::time::Instant;
+use std::{collections::HashMap, time::Instant};
 
 impl HypertileRuntime {
     /// Renders panes and the palette overlay if it is open.
@@ -23,38 +23,85 @@ impl HypertileRuntime {
         let highlight = self.core.state().focus_highlight();
         let registry = &mut self.registry;
         let border_config = &self.border_config;
-        let panes = self
-            .animation_state
-            .display_rects(area, self.core.state().panes(), now);
-
-        for &(pane_id, rect) in panes {
-            if let Some(full_id) = full
-                && full_id == pane_id
-            {
-                full_rect = Some(rect);
-                continue;
-            }
-            Clear.render(rect, buf);
-            let is_focused = highlight && Some(pane_id) == focused;
-            if let Some(plugin_instance) = registry.plugin_instance_mut(pane_id) {
-                // if plugin_instance.plugin_type() != "logs" {
-                //     log::info!("render {}", plugin_instance.plugin_type());
-                // }
-                plugin_instance.plugin().render(rect, buf, is_focused);
-            } else {
-                render_fallback_pane(border_config, pane_id, rect, buf, is_focused);
+        let mut close_pane = None;
+        let (panes, ani_active) =
+            self.animation_state
+                .display_rects(area, self.core.state().panes(), now);
+        let target_rects = self.core.state().panes().collect::<HashMap<_, _>>();
+        // skip other panes if there is no animation and showing a full pane
+        if let Some(full_id) = full
+            && !ani_active
+        {
+            // layout_cache is sorted here
+            debug_assert!(panes.is_sorted_by(|(a, _), (b, _)| a <= b));
+            full_rect = panes
+                .binary_search_by(|i| i.0.cmp(&full_id))
+                .map(|i| panes[i].1)
+                .ok();
+        } else {
+            for &(pane_id, rect) in panes {
+                if let Some(full_id) = full
+                    && full_id == pane_id
+                {
+                    full_rect = Some(rect);
+                    continue;
+                }
+                Clear.render(rect, buf);
+                let is_focused = highlight && Some(pane_id) == focused;
+                if let Some(plugin_instance) = registry.plugin_instance_mut(pane_id) {
+                    // if plugin_instance.plugin_type() != "logs" {
+                    //     log::info!("render {}", plugin_instance.plugin_type());
+                    // }
+                    let target_rect = if ani_active {
+                        target_rects.get(&pane_id).map(|rect| *rect)
+                    } else {
+                        None
+                    };
+                    plugin_instance
+                        .plugin()
+                        .render(rect, buf, is_focused, target_rect);
+                    if plugin_instance.plugin().is_closed() {
+                        close_pane = Some(pane_id);
+                    }
+                } else {
+                    render_fallback_pane(border_config, pane_id, rect, buf, is_focused);
+                }
             }
         }
+        // render full pane
         if let Some(rect) = full_rect
+            && !rect.is_empty()
             && let Some(pane_id) = full
         {
             Clear.render(rect, buf);
             let is_focused = highlight && Some(pane_id) == focused;
             if let Some(plugin) = registry.plugin_mut(pane_id) {
-                plugin.render(rect, buf, is_focused);
+                let target_rect = if ani_active {
+                    target_rects.get(&pane_id).map(|rect| *rect)
+                } else {
+                    None
+                };
+                plugin.render(rect, buf, is_focused, target_rect);
+                if plugin.is_closed() {
+                    close_pane = Some(pane_id);
+                }
             } else {
                 render_fallback_pane(border_config, pane_id, rect, buf, is_focused);
             }
+        }
+        if let Some(id) = close_pane {
+            let now = Instant::now();
+            registry.remove_plugin_if_exists(id);
+            self.capture_displayed_rects(now);
+            if Some(id) == focused {
+                let _ = self.core.state_mut().remove_focused();
+                if self.mode == InputMode::PluginInput {
+                    self.mode = InputMode::Layout;
+                }
+            } else {
+                let _ = self.core.state_mut().remove(id);
+            }
+            self.start_action_animation(now);
         }
 
         if self.palette.show {

@@ -1,13 +1,12 @@
-use ratatui::crossterm::event::KeyEvent;
+use ratatui::crossterm::event::Event;
 use ratatui::layout::Direction;
-use std::ops::{BitOr, BitOrAssign};
 
 /// Event delivered to the layout engine or runtime.
 ///
 /// The core engine only acts on `Action`. Key and tick are for higher-level code.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum HypertileEvent {
-    Key(KeyEvent),
+    Term(Event),
     Action(HypertileAction),
     Tick,
 }
@@ -56,14 +55,14 @@ pub enum HypertileAction {
 }
 
 /// Whether an event handler consumed an event.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum EventOutcome {
     Ignored,
     Consumed,
 }
 
 impl EventOutcome {
-    pub fn is_consumed(self) -> bool {
+    pub fn is_consumed(&self) -> bool {
         matches!(self, Self::Consumed)
     }
 }

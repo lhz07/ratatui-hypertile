@@ -46,6 +46,41 @@ impl HypertileState {
         Ok(())
     }
 
+    pub fn remove(&mut self, id: PaneId) -> Result<(), StateError> {
+        if let Some(fid) = self.full_pane
+            && fid == id
+        {
+            self.full_pane.take();
+        }
+        let path = self
+            .pane_paths
+            .get_mut(&id)
+            .ok_or(StateError::InvalidPath)?;
+        let parent_len = path.len() - 1;
+        let child_idx = path[parent_len];
+        let sibling_idx = 1 - child_idx;
+
+        let parent = node_mut_at_path(&mut self.root, &path[..parent_len])?;
+
+        let Node::Split { first, second, .. } = parent else {
+            return Err(StateError::ParentNodeNotSplit);
+        };
+
+        let sibling = if sibling_idx == 0 {
+            std::mem::replace(first.as_mut(), Node::Pane(PaneId::ROOT))
+        } else {
+            std::mem::replace(second.as_mut(), Node::Pane(PaneId::ROOT))
+        };
+
+        *parent = sibling;
+
+        path.truncate(parent_len);
+
+        self.rebuild_pane_index();
+        self.invalidate_layout_cache();
+        Ok(())
+    }
+
     /// Removes the focused pane and promotes its sibling.
     ///
     /// Returns the removed pane id.

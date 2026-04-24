@@ -1,5 +1,5 @@
 use ratatui_hypertile::HypertileEvent;
 
-pub fn event_from_crossterm(key: crossterm::event::KeyEvent) -> HypertileEvent {
-    HypertileEvent::Key(key)
+pub fn event_from_crossterm(event: crossterm::event::Event) -> HypertileEvent {
+    HypertileEvent::Term(event)
 }

@@ -14,7 +14,7 @@ mod widget;
 pub(crate) mod workspace;
 
 use crate::registry::{HypertilePlugin, Registry};
-use ::crossterm::event::{KeyCode, KeyEvent};
+use ::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
 use ratatui::layout::{Direction, Rect};
 use ratatui_hypertile::{
     EventOutcome, Hypertile as CoreHypertile, HypertileAction, HypertileEvent, PaneId,
@@ -41,8 +41,14 @@ use palette::PaletteState;
 
 use tokio::runtime::Runtime;
 
-static TOKIO_RUNTIME: LazyLock<Runtime> =
-    LazyLock::new(|| Runtime::new().expect("Failed to create Tokio runtime"));
+static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    // console_subscriber::init();
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .enable_all()
+        .build()
+        .expect("Failed to create Tokio runtime")
+});
 
 pub fn tokio_spawn<F>(future: F) -> JoinHandle<F::Output>
 where
@@ -247,6 +253,11 @@ impl HypertileRuntime {
         Ok(removed_id)
     }
 
+    pub fn close(&mut self, id: PaneId) -> Result<(), RuntimeError> {
+        self.registry.remove_plugin_if_exists(id);
+        Ok(())
+    }
+
     /// Replaces the focused pane's plugin without changing the layout.
     pub fn replace_focused_plugin(&mut self, plugin_type: &str) -> Result<(), RuntimeError> {
         let Some(pane_id) = self.core.focused_pane() else {
@@ -290,37 +301,44 @@ impl HypertileRuntime {
     /// instead of silently treating them as ignored input.
     pub fn try_handle_event(
         &mut self,
-        event: HypertileEvent,
+        event: &mut HypertileEvent,
     ) -> Result<EventOutcome, RuntimeError> {
         if let Some(outcome) = self.handle_palette_event(&event) {
             return outcome;
         }
 
         match event {
-            HypertileEvent::Action(action) => Ok(self.apply_core_action(action)),
-            HypertileEvent::Tick => Ok(self.registry.broadcast_event(&HypertileEvent::Tick)),
-            HypertileEvent::Key(chord) => {
-                if chord.code == KeyCode::Esc && chord.modifiers.is_empty() {
-                    if self.mode == InputMode::PluginInput {
-                        self.mode = InputMode::Layout;
-                        return Ok(EventOutcome::Consumed);
+            HypertileEvent::Action(action) => Ok(self.apply_core_action(*action)),
+            HypertileEvent::Tick => Ok(self.registry.broadcast_event(&mut HypertileEvent::Tick)),
+            HypertileEvent::Term(term_event) => match term_event {
+                Event::Key(chord) => {
+                    if chord.code == KeyCode::Char('g') && chord.modifiers == KeyModifiers::CONTROL
+                    {
+                        if self.mode == InputMode::PluginInput {
+                            self.mode = InputMode::Layout;
+                            return Ok(EventOutcome::Consumed);
+                        } else {
+                            self.mode = InputMode::PluginInput;
+                            return Ok(EventOutcome::Consumed);
+                        }
                     }
-                    return Ok(EventOutcome::Ignored);
-                }
 
-                match self.mode {
-                    InputMode::Layout => self.handle_layout_key(chord),
-                    InputMode::PluginInput => {
-                        Ok(self.forward_to_plugin(&HypertileEvent::Key(chord)))
+                    match self.mode {
+                        InputMode::Layout => self.handle_layout_key(*chord),
+                        InputMode::PluginInput => Ok(self.forward_to_plugin(event)),
                     }
                 }
-            }
+                _ if matches!(self.mode, InputMode::PluginInput) => {
+                    Ok(self.forward_to_plugin(event))
+                }
+                _ => Ok(EventOutcome::Ignored),
+            },
         }
     }
 
     /// Like [`try_handle_event`](Self::try_handle_event), but turns errors into
     /// [`EventOutcome::Ignored`](ratatui_hypertile::EventOutcome::Ignored).
-    pub fn handle_event(&mut self, event: HypertileEvent) -> EventOutcome {
+    pub fn handle_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
         self.try_handle_event(event)
             .unwrap_or(EventOutcome::Ignored)
     }
@@ -336,10 +354,6 @@ impl HypertileRuntime {
             }
             Some(RuntimeAction::OpenPalette) if !self.core.state().is_full() => self.open_palette(),
             Some(RuntimeAction::InteractFocused) => self.handle_interact_focused(),
-            Some(RuntimeAction::EnterPluginInput) => {
-                self.mode = InputMode::PluginInput;
-                Ok(EventOutcome::Consumed)
-            }
             _ => Ok(EventOutcome::Ignored),
         }
     }
@@ -378,7 +392,7 @@ impl HypertileRuntime {
         }
     }
 
-    fn forward_to_plugin(&mut self, event: &HypertileEvent) -> EventOutcome {
+    fn forward_to_plugin(&mut self, event: &mut HypertileEvent) -> EventOutcome {
         let Some(pane_id) = self.core.focused_pane() else {
             return EventOutcome::Ignored;
         };

@@ -25,3 +25,9 @@ serde = ["dep:serde"]
 
 [dev-dependencies]
 crossterm = "0.29"
+
+[patch."https://github.com/lhz07/wezterm_hyprtui.git"]
+wezterm-term = { path = "../wezterm_hyprtui/term" }
+wezterm-cell = { path = "../wezterm_hyprtui/wezterm-cell" }
+wezterm-surface = { path = "../wezterm_hyprtui/wezterm-surface" }
+termwiz = { path = "../wezterm_hyprtui/termwiz" }

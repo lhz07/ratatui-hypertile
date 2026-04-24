@@ -8,16 +8,22 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Trait implemented by pane-local plugins stored in [`Registry`].
 pub trait HypertilePlugin {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool);
+    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, target_rect: Option<Rect>);
 
     /// Return [`EventOutcome::Consumed`] to mark it handled.
-    fn on_event(&mut self, _event: &HypertileEvent) -> EventOutcome {
+    fn on_event(&mut self, _event: &mut HypertileEvent) -> EventOutcome {
         EventOutcome::Ignored
     }
 
     fn on_mount(&mut self, _ctx: PluginContext) {}
 
     fn on_unmount(&mut self, _ctx: PluginContext) {}
+
+    fn on_resize(&mut self, _cols: u16, _rows: u16) {}
+
+    fn is_closed(&mut self) -> bool {
+        false
+    }
 
     #[cfg(feature = "serde")]
     fn save_state(&self) -> Option<serde_json::Value> {
@@ -185,7 +191,7 @@ impl Registry {
 
     /// Forwards `event` to every mounted plugin.
     /// Returns [`EventOutcome::Consumed`] if any plugin consumes it.
-    pub fn broadcast_event(&mut self, event: &HypertileEvent) -> EventOutcome {
+    pub fn broadcast_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
         let mut consumed = false;
         for instance in self.instances.values_mut() {
             if instance.plugin.on_event(event).is_consumed() {

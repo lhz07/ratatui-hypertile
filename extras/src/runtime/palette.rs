@@ -3,7 +3,7 @@ use crate::runtime::constants::{
     DEFAULT_PLUGIN_TYPE,
 };
 use crate::runtime::{HypertileRuntime, RuntimeError};
-use crossterm::event::{KeyCode, KeyEvent};
+use crossterm::event::{Event, KeyCode, KeyEvent};
 use ratatui::layout::Direction;
 use ratatui_hypertile::{EventOutcome, HypertileEvent, PaneId};
 
@@ -148,20 +148,20 @@ impl HypertileRuntime {
         }
 
         match event {
-            HypertileEvent::Key(KeyEvent {
+            HypertileEvent::Term(Event::Key(KeyEvent {
                 code: KeyCode::Esc,
                 modifiers,
                 ..
-            }) if modifiers.is_empty() => {
+            })) if modifiers.is_empty() => {
                 self.palette.show = false;
                 self.palette.target_pane = None;
                 Some(Ok(EventOutcome::Consumed))
             }
-            HypertileEvent::Key(KeyEvent {
+            HypertileEvent::Term(Event::Key(KeyEvent {
                 code: KeyCode::Down | KeyCode::Tab,
                 modifiers,
                 ..
-            }) if modifiers.is_empty() => {
+            })) if modifiers.is_empty() => {
                 self.refresh_filtered_palette_cache();
                 let filtered_len = self.filtered_palette_items().len();
                 if filtered_len != 0 {
@@ -169,19 +169,19 @@ impl HypertileRuntime {
                 }
                 Some(Ok(EventOutcome::Consumed))
             }
-            HypertileEvent::Key(KeyEvent {
+            HypertileEvent::Term(Event::Key(KeyEvent {
                 code: KeyCode::Up | KeyCode::BackTab,
                 modifiers,
                 ..
-            }) if modifiers.is_empty() => {
+            })) if modifiers.is_empty() => {
                 self.palette.selected = self.palette.selected.saturating_sub(1);
                 Some(Ok(EventOutcome::Consumed))
             }
-            HypertileEvent::Key(KeyEvent {
+            HypertileEvent::Term(Event::Key(KeyEvent {
                 code: KeyCode::Enter,
                 modifiers,
                 ..
-            }) if modifiers.is_empty() => {
+            })) if modifiers.is_empty() => {
                 self.refresh_filtered_palette_cache();
                 let selected = self.palette.selected;
                 let plugin_type = self.filtered_palette_items().get(selected).cloned();
@@ -204,21 +204,21 @@ impl HypertileRuntime {
                     }))
                 }
             }
-            HypertileEvent::Key(KeyEvent {
+            HypertileEvent::Term(Event::Key(KeyEvent {
                 code: KeyCode::Backspace,
                 modifiers,
                 ..
-            }) if modifiers.is_empty() => {
+            })) if modifiers.is_empty() => {
                 self.palette.query.pop();
                 self.palette.invalidate_cache();
                 self.clamp_palette_selection();
                 Some(Ok(EventOutcome::Consumed))
             }
-            HypertileEvent::Key(KeyEvent {
+            HypertileEvent::Term(Event::Key(KeyEvent {
                 code: KeyCode::Char(ch),
                 modifiers,
                 ..
-            }) if modifiers.is_empty() => {
+            })) if modifiers.is_empty() => {
                 self.palette.query.push(*ch);
                 self.palette.invalidate_cache();
                 self.clamp_palette_selection();
@@ -290,7 +290,14 @@ mod tests {
 
     struct Dummy;
     impl HypertilePlugin for Dummy {
-        fn render(&mut self, _area: Rect, _buf: &mut Buffer, _is_focused: bool) {}
+        fn render(
+            &mut self,
+            _area: Rect,
+            _buf: &mut Buffer,
+            _is_focused: bool,
+            _target_rect: Option<Rect>,
+        ) {
+        }
     }
 
     #[test]
@@ -301,10 +308,10 @@ mod tests {
         runtime.register_plugin_type("cpu", || Dummy);
 
         let before = runtime.registry.instance_count();
-        let outcome = runtime.handle_event(HypertileEvent::Key(KeyEvent::new(
+        let outcome = runtime.handle_event(&mut HypertileEvent::Term(Event::Key(KeyEvent::new(
             KeyCode::Char('s'),
             KeyModifiers::NONE,
-        )));
+        ))));
         assert!(outcome.is_consumed());
         assert_eq!(runtime.registry.instance_count(), before + 1);
         assert!(runtime.palette.show);
@@ -317,10 +324,10 @@ mod tests {
         runtime.palette.query = "cpu".to_string();
         runtime.clamp_palette_selection();
         let apply = runtime
-            .handle_palette_event(&HypertileEvent::Key(KeyEvent::new(
+            .handle_palette_event(&HypertileEvent::Term(Event::Key(KeyEvent::new(
                 KeyCode::Enter,
                 KeyModifiers::NONE,
-            )))
+            ))))
             .expect("palette should handle enter")
             .expect("palette apply should succeed");
         assert!(apply.is_consumed());
@@ -336,10 +343,10 @@ mod tests {
         runtime.register_plugin_type("cpu", || Dummy);
 
         let before = runtime.registry.instance_count();
-        let outcome = runtime.handle_event(HypertileEvent::Key(KeyEvent::new(
+        let outcome = runtime.handle_event(&mut HypertileEvent::Term(Event::Key(KeyEvent::new(
             KeyCode::Char('s'),
             KeyModifiers::NONE,
-        )));
+        ))));
         assert!(outcome.is_consumed());
         assert_eq!(runtime.registry.instance_count(), before + 1);
         assert!(!runtime.palette.show);
@@ -356,10 +363,10 @@ mod tests {
         runtime.replace_focused_plugin("cpu").unwrap();
         assert_eq!(runtime.mode(), InputMode::Layout);
 
-        let outcome = runtime.handle_event(HypertileEvent::Key(KeyEvent::new(
+        let outcome = runtime.handle_event(&mut HypertileEvent::Term(Event::Key(KeyEvent::new(
             KeyCode::Enter,
             KeyModifiers::NONE,
-        )));
+        ))));
         assert!(outcome.is_consumed());
         assert_eq!(runtime.mode(), InputMode::PluginInput);
     }

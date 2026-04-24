@@ -1,4 +1,4 @@
-use crossterm::event::{KeyCode, KeyModifiers};
+use crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui_hypertile::{EventOutcome, HypertileEvent};
 use std::{
@@ -199,8 +199,13 @@ impl WorkspaceRuntime {
     /// `Ctrl+t`, `Ctrl+w`, `Ctrl+n`, `Ctrl+p`, `Ctrl+Left`, and `Ctrl+Right`
     /// are reserved for tab management. Everything else goes to the active
     /// runtime.
-    pub fn handle_event(&mut self, event: HypertileEvent) -> EventOutcome {
-        if let HypertileEvent::Key(chord) = &event {
+    pub fn handle_event(&mut self, mut event: HypertileEvent) -> EventOutcome {
+        if self.tabs[self.active].runtime.handle_event(&mut event) == EventOutcome::Consumed {
+            return EventOutcome::Consumed;
+        }
+        if let HypertileEvent::Term(term) = &event
+            && let Event::Key(chord) = term
+        {
             if chord.modifiers == KeyModifiers::CONTROL {
                 match chord.code {
                     KeyCode::Char('t') => {
@@ -258,19 +263,20 @@ impl WorkspaceRuntime {
             && !ani.is_finished(Instant::now())
             && let HypertileEvent::Tick = event
         {
+            let mut event = event;
             let (left, right) = ani.get_workspaces();
             if left != self.active
                 && let Some(tab) = self.tabs.get_mut(left)
             {
-                tab.runtime.handle_event(event);
+                tab.runtime.handle_event(&mut event);
             }
             if right != self.active
                 && let Some(tab) = self.tabs.get_mut(right)
             {
-                tab.runtime.handle_event(event);
+                tab.runtime.handle_event(&mut event);
             }
         }
-        self.tabs[self.active].runtime.handle_event(event)
+        EventOutcome::Ignored
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {

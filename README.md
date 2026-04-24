@@ -26,22 +26,23 @@ cargo run --example core_only
 
 ### General
 
-| Key      | Operation |
-| -------- | --------- |
-| Ctrl + c | quit      |
+| Key            | Operation |
+| -------------- | --------- |
+| Ctrl + Alt + c | quit      |
 
 ### Block
 
-| Key             | Operation                                   |
-| --------------- | ------------------------------------------- |
-| p               | open new block                              |
-| d               | close focused block                         |
-| f               | toggle fullscreen                           |
-| t               | split focused block automatically           |
-| s/v             | split focused block horizontally/vertically |
-| [ / ]           | resize focused block                        |
-| h/j/k/l         | focus                                       |
-| Shift + h/j/k/l | move block                                  |
+| Key             | Operation                                                             |
+| --------------- | --------------------------------------------------------------------- |
+| p               | open new block                                                        |
+| d               | close focused block                                                   |
+| f               | toggle fullscreen                                                     |
+| t               | split focused block automatically                                     |
+| s/v             | split focused block horizontally/vertically                           |
+| [ / ]           | resize focused block                                                  |
+| h/j/k/l         | focus                                                                 |
+| Shift + h/j/k/l | move block                                                            |
+| Ctrl + g        | toggle transparent input (means every key will be sent to this block) |
 
 ### Workspace
 

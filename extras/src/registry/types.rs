@@ -1,4 +1,3 @@
-use ratatui::layout::Rect;
 use ratatui_hypertile::PaneId;
 
 /// Passed to plugin mount and unmount callbacks.

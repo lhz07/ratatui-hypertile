@@ -294,7 +294,7 @@ impl Hypertile {
     pub fn try_handle_event(&mut self, event: HypertileEvent) -> Result<EventOutcome, StateError> {
         match event {
             HypertileEvent::Action(action) => self.try_apply_action(action),
-            HypertileEvent::Key(_) | HypertileEvent::Tick => Ok(EventOutcome::Ignored),
+            HypertileEvent::Term(_) | HypertileEvent::Tick => Ok(EventOutcome::Ignored),
         }
     }
 

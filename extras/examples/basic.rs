@@ -4,7 +4,9 @@
 //! `s`/`v` split, `d` close, `[`/`]` resize, `p` palette, `i` input,
 //! `Ctrl+t/w` tabs, `Ctrl+c` quit.
 
-use crossterm::event::{self, Event, KeyCode, KeyModifiers};
+use crossterm::event::{
+    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyModifiers,
+};
 use ratatui::{
     buffer::Buffer,
     layout::{Constraint, Direction, Layout, Rect},
@@ -20,7 +22,7 @@ use ratatui_hypertile_extras::{
 };
 use std::{
     collections::VecDeque,
-    io,
+    io::{self, stdout},
     time::{Duration, Instant},
 };
 use tui_logger::TuiWidgetState;
@@ -54,11 +56,15 @@ fn build_runtime() -> HypertileRuntime {
 
 fn main() -> io::Result<()> {
     // Set max_log_level to Trace
+    // it spawns a thread
     tui_logger::init_logger(log::LevelFilter::Trace).unwrap();
 
     // Set default level for unknown targets to Trace
     tui_logger::set_default_level(log::LevelFilter::Trace);
+    tui_logger::set_env_filter_from_string("basic=trace, ratatui_hypertile_extras=trace");
     let mut terminal = ratatui::init();
+    // enable bracketed paste
+    crossterm::execute!(stdout(), EnableBracketedPaste)?;
 
     let mut workspace = WorkspaceRuntime::new(build_runtime);
 
@@ -69,6 +75,7 @@ fn main() -> io::Result<()> {
     let _ = rt.split_focused(Some(Direction::Horizontal), "network");
 
     let result = run(&mut terminal, &mut workspace);
+    crossterm::execute!(stdout(), DisableBracketedPaste)?;
     ratatui::restore();
     result
 }
@@ -100,22 +107,28 @@ fn run(
             let [mode_area, hint_area] =
                 Layout::horizontal([Constraint::Length(10), Constraint::Min(0)]).areas(footer);
             ModeIndicator::new(rt.mode()).render(mode_area, frame.buffer_mut());
-            Paragraph::new("  Ctrl+t/w: tab | s/v: split | d: close | p: palette | i: input")
+            Paragraph::new("  Ctrl+t/w: tab | s/v: split | d: close | p: palette | Ctrl+g: input | Ctrl+Alt+c: quit")
                 .style(Style::default().fg(Color::DarkGray))
                 .render(hint_area, frame.buffer_mut());
         })?;
 
-        let timeout = workspace.next_frame_in().map_or_else(
-            || tick_rate.saturating_sub(last_tick.elapsed()),
-            |frame| frame.min(tick_rate.saturating_sub(last_tick.elapsed())),
-        );
-        if event::poll(timeout)?
-            && let Event::Key(key) = event::read()?
-        {
-            if key.code == KeyCode::Char('c') && key.modifiers == KeyModifiers::CONTROL {
+        // let timeout = workspace.next_frame_in().map_or_else(
+        //     || tick_rate.saturating_sub(last_tick.elapsed()),
+        //     |frame| frame.min(tick_rate.saturating_sub(last_tick.elapsed())),
+        // );
+        let timeout = Duration::from_millis(16);
+        if event::poll(timeout)? {
+            let event = event::read()?;
+            if !matches!(event, Event::Paste(_)) {
+                log::info!("{:?}", event);
+            }
+            if let Event::Key(key) = event
+                && key.code == KeyCode::Char('c')
+                && key.modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT
+            {
                 return Ok(());
             }
-            workspace.handle_event(event_from_crossterm(key));
+            workspace.handle_event(event_from_crossterm(event));
         }
 
         if last_tick.elapsed() >= tick_rate {
@@ -160,7 +173,13 @@ struct MonitorPlugin {
 }
 
 impl HypertilePlugin for MonitorPlugin {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        _target_rect: Option<Rect>,
+    ) {
         let mut lines = vec![Line::from("")];
         for (i, &usage) in self.cpu.iter().enumerate() {
             let filled = usage as usize * 20 / 100;
@@ -190,7 +209,7 @@ impl HypertilePlugin for MonitorPlugin {
             .render(area, buf);
     }
 
-    fn on_event(&mut self, event: &HypertileEvent) -> EventOutcome {
+    fn on_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
         if !matches!(event, HypertileEvent::Tick) {
             return EventOutcome::Ignored;
         }
@@ -225,14 +244,20 @@ struct LogsPlugin {
 }
 
 impl HypertilePlugin for LogsPlugin {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        _target_rect: Option<Rect>,
+    ) {
         let logs = tui_logger::TuiLoggerWidget::default()
             .block(pane_block("Logs", is_focused, Color::Blue))
             .state(&self.log_state);
         logs.render(area, buf);
     }
 
-    fn on_event(&mut self, event: &HypertileEvent) -> EventOutcome {
+    fn on_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
         if !matches!(event, HypertileEvent::Tick) {
             return EventOutcome::Ignored;
         }
@@ -255,31 +280,41 @@ struct EditorPlugin {
 }
 
 impl HypertilePlugin for EditorPlugin {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        _target_rect: Option<Rect>,
+    ) {
         Paragraph::new(format!("{}\u{2588}", self.text))
             .block(pane_block("Editor", is_focused, Color::Magenta))
             .wrap(Wrap { trim: false })
             .render(area, buf);
     }
 
-    fn on_event(&mut self, event: &HypertileEvent) -> EventOutcome {
-        let HypertileEvent::Key(key) = event else {
+    fn on_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
+        let HypertileEvent::Term(term) = event else {
             return EventOutcome::Ignored;
         };
-        match key.code {
-            KeyCode::Char(ch) => {
-                self.text.push(ch);
-                EventOutcome::Consumed
+        if let Event::Key(key) = term {
+            match key.code {
+                KeyCode::Char(ch) => {
+                    self.text.push(ch);
+                    EventOutcome::Consumed
+                }
+                KeyCode::Enter => {
+                    self.text.push('\n');
+                    EventOutcome::Consumed
+                }
+                KeyCode::Backspace => {
+                    self.text.pop();
+                    EventOutcome::Consumed
+                }
+                _ => EventOutcome::Ignored,
             }
-            KeyCode::Enter => {
-                self.text.push('\n');
-                EventOutcome::Consumed
-            }
-            KeyCode::Backspace => {
-                self.text.pop();
-                EventOutcome::Consumed
-            }
-            _ => EventOutcome::Ignored,
+        } else {
+            EventOutcome::Ignored
         }
     }
 }
@@ -289,7 +324,13 @@ struct NetworkPlugin {
 }
 
 impl HypertilePlugin for NetworkPlugin {
-    fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool) {
+    fn render(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        is_focused: bool,
+        _target_rect: Option<Rect>,
+    ) {
         let t = self.tick;
         let conns = 800 + (t * 17 % 120) as u32;
         let rps = 1100 + (t * 31 % 400) as u32;
@@ -337,7 +378,7 @@ impl HypertilePlugin for NetworkPlugin {
             .render(area, buf);
     }
 
-    fn on_event(&mut self, event: &HypertileEvent) -> EventOutcome {
+    fn on_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
         if matches!(event, HypertileEvent::Tick) {
             self.tick += 1;
             EventOutcome::Consumed
