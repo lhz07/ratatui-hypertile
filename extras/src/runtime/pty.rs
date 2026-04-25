@@ -1,5 +1,6 @@
+use crate::{HypertilePlugin, runtime::tokio_spawn};
 use crossterm::event::{
-    Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
+    self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
     KeyEventKind, KeyModifiers as CrosstermModifiers,
 };
 use portable_pty::{Child, CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
@@ -19,7 +20,6 @@ use std::{
     sync::Arc,
     task::{Poll, ready},
 };
-
 use termwiz::color::ColorAttribute;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, unix::AsyncFd},
@@ -32,8 +32,6 @@ use wezterm_cell::{Cell, Intensity};
 use wezterm_term::{
     KeyCode, KeyModifiers, Terminal, TerminalConfiguration, TerminalSize, TerminalState,
 };
-
-use crate::{HypertilePlugin, runtime::tokio_spawn};
 
 #[derive(Default)]
 pub struct PtyPlugin {
@@ -236,6 +234,7 @@ impl MountedPty {
             pixel_height: 0,
             dpi: 96,
         };
+        let mut view_row = 0i64;
         let writer = AsyncWriteAdapter::new(input_tx);
         tokio_spawn(async move {
             let res: Result<(), anyhow::Error> = async {
@@ -277,7 +276,7 @@ impl MountedPty {
                         }
                         // no more to read, render it
                         Some(msg) = render_rx.recv() => {
-                            handle_msg(msg, &mut terminal, &mut size);
+                            handle_msg(msg, &mut terminal, &mut size, &mut view_row);
                         }
                         else => {
                             break;
@@ -302,7 +301,12 @@ impl MountedPty {
     }
 }
 
-fn handle_msg(msg: RenderMsg, terminal: &mut TerminalState, size: &mut TerminalSize) {
+fn handle_msg(
+    msg: RenderMsg,
+    terminal: &mut TerminalState,
+    size: &mut TerminalSize,
+    view_row: &mut i64,
+) {
     match msg {
         RenderMsg::RenderScreen(area, mut buf, tx, is_focused) => {
             let title = terminal.get_title();
@@ -312,7 +316,7 @@ fn handle_msg(msg: RenderMsg, terminal: &mut TerminalState, size: &mut TerminalS
                 format!(" fish ")
             };
             let block = pane_block(title, is_focused, Color::Blue);
-            let term = TerminalWidget::new(&terminal);
+            let term = TerminalWidget::new(&terminal, *view_row);
             // let ins = std::time::Instant::now();
             term.render(block.inner(area), &mut buf);
             // about 50 - 500 micro seconds
@@ -350,6 +354,18 @@ fn handle_msg(msg: RenderMsg, terminal: &mut TerminalState, size: &mut TerminalS
                     CrosstermEvent::Paste(s) => {
                         if let Err(e) = terminal.send_paste(&s) {
                             log::error!("paste: {e}");
+                        }
+                    }
+                    CrosstermEvent::Mouse(mouse) => {
+                        let offset = match mouse.kind {
+                            event::MouseEventKind::ScrollDown => 1,
+                            event::MouseEventKind::ScrollUp => -1,
+                            _ => return,
+                        };
+                        let new = *view_row + offset;
+                        let invisible = terminal.screen().phys_row(0);
+                        if new <= 0 && new >= -(invisible as i64) {
+                            *view_row = new;
                         }
                     }
                     _ => (),
@@ -448,20 +464,23 @@ impl HypertilePlugin for PtyPlugin {
 /// 将 WezTerm 的屏幕转换为 Ratatui 可渲染的内容
 pub struct TerminalRenderer<'a> {
     terminal: &'a TerminalState,
+    view_row: i64,
 }
 
 impl<'a> TerminalRenderer<'a> {
-    pub fn new(terminal: &'a TerminalState) -> Self {
-        Self { terminal }
+    pub fn new(terminal: &'a TerminalState, view_row: i64) -> Self {
+        Self { terminal, view_row }
     }
 
     /// 将终端屏幕转换为 Ratatui 的 Line
     pub fn render_screen(&self) -> Vec<Line<'static>> {
         let screen = self.terminal.screen();
         let mut lines = Vec::new();
-        let rows = self.terminal.get_size().rows as i64;
+        let phys_row = screen.phys_row(0);
+        let start = phys_row.saturating_sub(self.view_row.abs() as usize);
+        let end = start + self.terminal.get_size().rows;
         // 遍历所有可见行
-        for line in screen.lines_in_phys_range(screen.phys_range(&(0..rows))) {
+        for line in screen.lines_in_phys_range(start..end) {
             let mut spans = Vec::new();
 
             // 遍历该行中的所有 cell
@@ -585,9 +604,9 @@ pub struct TerminalWidget<'a> {
 }
 
 impl<'a> TerminalWidget<'a> {
-    pub fn new(terminal: &'a TerminalState) -> Self {
+    pub fn new(terminal: &'a TerminalState, view_row: i64) -> Self {
         Self {
-            renderer: TerminalRenderer::new(terminal),
+            renderer: TerminalRenderer::new(terminal, view_row),
         }
     }
 }

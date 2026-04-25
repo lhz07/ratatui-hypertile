@@ -16,7 +16,7 @@ From the repo root:
 
 ```sh
 # full runtime: plugins, tabs, palette, animations
-cargo run -p ratatui-hypertile-extras --example basic
+cargo run -p ratatui-hypertile-extras --example basic --release
 
 # core only, no extras dependency
 cargo run --example core_only

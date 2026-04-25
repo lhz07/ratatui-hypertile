@@ -1,11 +1,6 @@
-//! Extras runtime demo.
-//!
-//! Keys: `hjkl`/arrows focus, `HJKL` or `Shift+Arrows` move panes,
-//! `s`/`v` split, `d` close, `[`/`]` resize, `p` palette, `i` input,
-//! `Ctrl+t/w` tabs, `Ctrl+c` quit.
-
 use crossterm::event::{
-    self, DisableBracketedPaste, EnableBracketedPaste, Event, KeyCode, KeyModifiers,
+    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+    Event, KeyCode, KeyModifiers,
 };
 use ratatui::{
     buffer::Buffer,
@@ -21,7 +16,6 @@ use ratatui_hypertile_extras::{
     WorkspaceRuntime, event_from_crossterm, pty::PtyPlugin,
 };
 use std::{
-    collections::VecDeque,
     io::{self, stdout},
     time::{Duration, Instant},
 };
@@ -42,9 +36,7 @@ fn build_runtime() -> HypertileRuntime {
     });
 
     rt.register_plugin_type("logs", || LogsPlugin {
-        lines: VecDeque::new(),
         log_state: TuiWidgetState::new(),
-        tick: 0,
     });
     rt.register_plugin_type("editor", || EditorPlugin {
         text: String::new(),
@@ -63,8 +55,10 @@ fn main() -> io::Result<()> {
     tui_logger::set_default_level(log::LevelFilter::Trace);
     tui_logger::set_env_filter_from_string("basic=trace, ratatui_hypertile_extras=trace");
     let mut terminal = ratatui::init();
+    let mut stdout = stdout();
     // enable bracketed paste
-    crossterm::execute!(stdout(), EnableBracketedPaste)?;
+    crossterm::execute!(stdout, EnableBracketedPaste)?;
+    crossterm::execute!(stdout, EnableMouseCapture)?;
 
     let mut workspace = WorkspaceRuntime::new(build_runtime);
 
@@ -75,7 +69,8 @@ fn main() -> io::Result<()> {
     let _ = rt.split_focused(Some(Direction::Horizontal), "network");
 
     let result = run(&mut terminal, &mut workspace);
-    crossterm::execute!(stdout(), DisableBracketedPaste)?;
+    crossterm::execute!(stdout, DisableBracketedPaste)?;
+    crossterm::execute!(stdout, DisableMouseCapture)?;
     ratatui::restore();
     result
 }
@@ -224,23 +219,8 @@ impl HypertilePlugin for MonitorPlugin {
     }
 }
 
-const LOG_ENTRIES: &[(&str, Color)] = &[
-    ("GET /api/users 200 OK", Color::Green),
-    ("POST /api/auth 201 Created", Color::Green),
-    ("WARN connection pool near capacity", Color::Yellow),
-    ("GET /api/health 200 OK", Color::DarkGray),
-    ("ERROR failed to reach upstream", Color::Red),
-    ("INFO worker 3 started", Color::Cyan),
-    ("DEBUG cache hit ratio: 0.94", Color::DarkGray),
-    ("GET /api/items?page=2 200 OK", Color::Green),
-    ("WARN slow query: 342ms", Color::Yellow),
-    ("INFO deployment v1.4.2 rolling out", Color::Cyan),
-];
-
 struct LogsPlugin {
-    lines: VecDeque<(String, Color)>,
     log_state: TuiWidgetState,
-    tick: u64,
 }
 
 impl HypertilePlugin for LogsPlugin {
@@ -251,7 +231,13 @@ impl HypertilePlugin for LogsPlugin {
         is_focused: bool,
         _target_rect: Option<Rect>,
     ) {
-        let logs = tui_logger::TuiLoggerWidget::default()
+        let widget = tui_logger::TuiLoggerWidget::default()
+            .style_error(Style::new().red().bold())
+            .style_warn(Style::new().yellow())
+            .style_info(Style::new().blue())
+            .style_debug(Style::new().magenta())
+            .style_trace(Style::new().gray());
+        let logs = widget
             .block(pane_block("Logs", is_focused, Color::Blue))
             .state(&self.log_state);
         logs.render(area, buf);

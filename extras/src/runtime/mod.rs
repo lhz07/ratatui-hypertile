@@ -14,7 +14,7 @@ mod widget;
 pub(crate) mod workspace;
 
 use crate::registry::{HypertilePlugin, Registry};
-use ::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use ratatui::layout::{Direction, Rect};
 use ratatui_hypertile::{
     EventOutcome, Hypertile as CoreHypertile, HypertileAction, HypertileEvent, PaneId,
@@ -331,6 +331,12 @@ impl HypertileRuntime {
                 _ if matches!(self.mode, InputMode::PluginInput) => {
                     Ok(self.forward_to_plugin(event))
                 }
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
+                        Ok(self.forward_to_plugin(event))
+                    }
+                    _ => Ok(EventOutcome::Ignored),
+                },
                 _ => Ok(EventOutcome::Ignored),
             },
         }
