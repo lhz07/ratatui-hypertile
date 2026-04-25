@@ -322,7 +322,6 @@ impl HypertileRuntime {
                             return Ok(EventOutcome::Consumed);
                         }
                     }
-
                     match self.mode {
                         InputMode::Layout => {
                             if !self.handle_layout_key(*chord)?.is_consumed() {
@@ -333,9 +332,6 @@ impl HypertileRuntime {
                         }
                         InputMode::PluginInput => Ok(self.forward_to_plugin(event)),
                     }
-                }
-                _ if matches!(self.mode, InputMode::PluginInput) => {
-                    Ok(self.forward_to_plugin(event))
                 }
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
@@ -359,29 +355,39 @@ impl HypertileRuntime {
                     }
                     _ => Ok(EventOutcome::Ignored),
                 },
-                _ => Ok(EventOutcome::Ignored),
+                _ => Ok(self.forward_to_plugin(event)),
             },
         }
     }
 
     /// Like [`try_handle_event`](Self::try_handle_event), but turns errors into
-    /// [`EventOutcome::Ignored`](ratatui_hypertile::EventOutcome::Ignored).
+    /// [`EventOutcome::Ignored`](ratatui_hypertile::EventOutcome::Consumed).
     pub fn handle_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
         self.try_handle_event(event)
-            .unwrap_or(EventOutcome::Ignored)
+            .unwrap_or(EventOutcome::Consumed)
     }
 
     fn handle_layout_key(&mut self, chord: KeyEvent) -> Result<EventOutcome, RuntimeError> {
         match self.default_layout_action(chord) {
-            Some(RuntimeAction::Core(action)) => Ok(self.apply_core_action(action)),
-            Some(RuntimeAction::SplitDirection(direction)) if !self.core.state().is_full() => {
-                self.handle_split_shortcut(Some(direction))
+            Some(action) => {
+                match action {
+                    RuntimeAction::Core(action) => {
+                        self.apply_core_action(action);
+                    }
+                    RuntimeAction::SplitDirection(direction) if !self.core.state().is_full() => {
+                        self.handle_split_shortcut(Some(direction))?;
+                    }
+                    RuntimeAction::SplitDefault if !self.core.state().is_full() => {
+                        self.handle_split_shortcut(None)?;
+                    }
+                    RuntimeAction::OpenPalette if !self.core.state().is_full() => {
+                        let _ = self.open_palette();
+                    }
+                    _ => (),
+                }
+                Ok(EventOutcome::Consumed)
             }
-            Some(RuntimeAction::SplitDefault) if !self.core.state().is_full() => {
-                self.handle_split_shortcut(None)
-            }
-            Some(RuntimeAction::OpenPalette) if !self.core.state().is_full() => self.open_palette(),
-            _ => Ok(EventOutcome::Ignored),
+            None => Ok(EventOutcome::Ignored),
         }
     }
 

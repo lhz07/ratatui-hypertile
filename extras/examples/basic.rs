@@ -116,6 +116,8 @@ fn run(
             let event = event::read()?;
             if !matches!(event, Event::Paste(_)) {
                 log::info!("{:?}", event);
+            } else {
+                log::info!("paste event");
             }
             if let Event::Key(key) = event
                 && key.code == KeyCode::Char('c')
