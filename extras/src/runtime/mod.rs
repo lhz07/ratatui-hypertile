@@ -444,7 +444,7 @@ impl HypertileRuntime {
                 action,
                 HypertileAction::MoveFocused { .. }
                     | HypertileAction::CloseFocused
-                    | HypertileAction::FocusFull
+                    | HypertileAction::FocusMax
             )
             && self.animation_state.last_area().is_some()
     }

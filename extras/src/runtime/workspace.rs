@@ -207,7 +207,7 @@ impl WorkspaceRuntime {
         if let HypertileEvent::Term(term) = &event
             && let Event::Key(chord) = term
         {
-            if chord.modifiers == KeyModifiers::CONTROL {
+            if chord.modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT {
                 match chord.code {
                     KeyCode::Char('t') => {
                         self.new_tab();
@@ -217,19 +217,10 @@ impl WorkspaceRuntime {
                         self.close_tab(self.active);
                         return EventOutcome::Consumed;
                     }
-                    KeyCode::Char('n') | KeyCode::Right => {
-                        self.next_tab();
-                        return EventOutcome::Consumed;
-                    }
-                    KeyCode::Char('p') | KeyCode::Left => {
-                        self.prev_tab();
-                        return EventOutcome::Consumed;
-                    }
 
                     _ => (),
                 }
-            }
-            if chord.modifiers == KeyModifiers::ALT {
+            } else if chord.modifiers == KeyModifiers::ALT {
                 match chord.code {
                     KeyCode::Right => {
                         self.next_tab();
@@ -239,12 +230,6 @@ impl WorkspaceRuntime {
                         self.prev_tab();
                         return EventOutcome::Consumed;
                     }
-
-                    _ => (),
-                }
-            }
-            if chord.modifiers == KeyModifiers::NONE {
-                match chord.code {
                     KeyCode::Char(ch) if ch.is_ascii_digit() => {
                         let mut i = ch as usize - '0' as usize;
                         if i == 0 {

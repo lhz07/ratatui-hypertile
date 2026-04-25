@@ -27,48 +27,45 @@ impl MoveBindings {
         matches!(self, Self::Vim | Self::VimAndShiftArrows)
     }
 
-    fn includes_shift_arrows(self) -> bool {
-        matches!(self, Self::ShiftArrows | Self::VimAndShiftArrows)
-    }
+    // fn includes_shift_arrows(self) -> bool {
+    //     matches!(self, Self::ShiftArrows | Self::VimAndShiftArrows)
+    // }
 }
 
 impl HypertileRuntime {
     pub(super) fn default_layout_action(&self, chord: KeyEvent) -> Option<RuntimeAction> {
-        const SHIFT_ARROW_MOVES: [(KeyCode, Direction, Towards); 4] = [
-            (KeyCode::Left, Direction::Horizontal, Towards::Start),
-            (KeyCode::Right, Direction::Horizontal, Towards::End),
-            (KeyCode::Down, Direction::Vertical, Towards::End),
-            (KeyCode::Up, Direction::Vertical, Towards::Start),
-        ];
+        // const SHIFT_ARROW_MOVES: [(KeyCode, Direction, Towards); 4] = [
+        //     (KeyCode::Left, Direction::Horizontal, Towards::Start),
+        //     (KeyCode::Right, Direction::Horizontal, Towards::End),
+        //     (KeyCode::Down, Direction::Vertical, Towards::End),
+        //     (KeyCode::Up, Direction::Vertical, Towards::Start),
+        // ];
 
-        if self.move_bindings.includes_shift_arrows() && chord.modifiers == KeyModifiers::SHIFT {
-            for &(code, direction, towards) in &SHIFT_ARROW_MOVES {
-                if chord.code == code {
-                    return Some(RuntimeAction::Core(HypertileAction::MoveFocused {
-                        direction,
-                        towards,
-                        scope: self.default_move_scope,
-                    }));
-                }
-            }
-        }
+        // if self.move_bindings.includes_shift_arrows()
+        //     && chord.modifiers == KeyModifiers::SHIFT | KeyModifiers::ALT
+        // {
+        //     for &(code, direction, towards) in &SHIFT_ARROW_MOVES {
+        //         if chord.code == code {
+        //             return Some(RuntimeAction::Core(HypertileAction::MoveFocused {
+        //                 direction,
+        //                 towards,
+        //                 scope: self.default_move_scope,
+        //             }));
+        //         }
+        //     }
+        // }
 
         const VIM_MOVES: [(char, Direction, Towards); 4] = [
-            ('h', Direction::Horizontal, Towards::Start),
-            ('l', Direction::Horizontal, Towards::End),
-            ('j', Direction::Vertical, Towards::End),
-            ('k', Direction::Vertical, Towards::Start),
+            ('H', Direction::Horizontal, Towards::Start),
+            ('L', Direction::Horizontal, Towards::End),
+            ('J', Direction::Vertical, Towards::End),
+            ('K', Direction::Vertical, Towards::Start),
         ];
-
-        if self.move_bindings.includes_vim() {
+        if self.move_bindings.includes_vim()
+            && chord.modifiers == KeyModifiers::SHIFT | KeyModifiers::ALT
+        {
             for &(ch, direction, towards) in &VIM_MOVES {
-                let upper = ch.to_ascii_uppercase();
-                let matches = match (chord.code, chord.modifiers) {
-                    (KeyCode::Char(c), KeyModifiers::SHIFT) if c == upper || c == ch => true,
-                    (KeyCode::Char(c), KeyModifiers::NONE) if c == upper => true,
-                    _ => false,
-                };
-                if matches {
+                if chord.code == KeyCode::Char(ch) {
                     return Some(RuntimeAction::Core(HypertileAction::MoveFocused {
                         direction,
                         towards,
@@ -78,49 +75,55 @@ impl HypertileRuntime {
             }
         }
 
-        if !chord.modifiers.is_empty() {
-            return None;
-        }
-
-        match chord.code {
-            KeyCode::Tab => Some(RuntimeAction::Core(HypertileAction::FocusNext)),
-            KeyCode::BackTab => Some(RuntimeAction::Core(HypertileAction::FocusPrev)),
-            KeyCode::Char('f') => Some(RuntimeAction::Core(HypertileAction::FocusFull)),
-            KeyCode::Left | KeyCode::Char('h') => {
+        match (chord.modifiers, chord.code) {
+            (KeyModifiers::ALT, KeyCode::Char('p')) => Some(RuntimeAction::OpenPalette),
+            (KeyModifiers::ALT, KeyCode::Char('d')) => {
+                Some(RuntimeAction::Core(HypertileAction::FocusMax))
+            }
+            (KeyModifiers::ALT, KeyCode::Char('q')) => {
+                Some(RuntimeAction::Core(HypertileAction::CloseFocused))
+            }
+            (KeyModifiers::ALT, KeyCode::Char('t')) => Some(RuntimeAction::SplitDefault),
+            (KeyModifiers::ALT, KeyCode::Char('s')) => {
+                Some(RuntimeAction::SplitDirection(Direction::Horizontal))
+            }
+            (KeyModifiers::ALT, KeyCode::Char('v')) => {
+                Some(RuntimeAction::SplitDirection(Direction::Vertical))
+            }
+            (KeyModifiers::ALT, KeyCode::Char('-')) => {
+                Some(RuntimeAction::Core(HypertileAction::ResizeFocused {
+                    delta: -self.core.resize_step(),
+                }))
+            }
+            (KeyModifiers::ALT, KeyCode::Char('=')) => {
+                Some(RuntimeAction::Core(HypertileAction::ResizeFocused {
+                    delta: self.core.resize_step(),
+                }))
+            }
+            (KeyModifiers::ALT, KeyCode::Char('h')) => {
                 Some(RuntimeAction::Core(HypertileAction::FocusDirection {
                     direction: Direction::Horizontal,
                     towards: Towards::Start,
                 }))
             }
-            KeyCode::Right | KeyCode::Char('l') => {
+            (KeyModifiers::ALT, KeyCode::Char('l')) => {
                 Some(RuntimeAction::Core(HypertileAction::FocusDirection {
                     direction: Direction::Horizontal,
                     towards: Towards::End,
                 }))
             }
-            KeyCode::Down | KeyCode::Char('j') => {
+            (KeyModifiers::ALT, KeyCode::Char('j')) => {
                 Some(RuntimeAction::Core(HypertileAction::FocusDirection {
                     direction: Direction::Vertical,
                     towards: Towards::End,
                 }))
             }
-            KeyCode::Up | KeyCode::Char('k') => {
+            (KeyModifiers::ALT, KeyCode::Char('k')) => {
                 Some(RuntimeAction::Core(HypertileAction::FocusDirection {
                     direction: Direction::Vertical,
                     towards: Towards::Start,
                 }))
             }
-            KeyCode::Char('s') => Some(RuntimeAction::SplitDirection(Direction::Horizontal)),
-            KeyCode::Char('v') => Some(RuntimeAction::SplitDirection(Direction::Vertical)),
-            KeyCode::Char('t') => Some(RuntimeAction::SplitDefault),
-            KeyCode::Char('d') => Some(RuntimeAction::Core(HypertileAction::CloseFocused)),
-            KeyCode::Char('[') => Some(RuntimeAction::Core(HypertileAction::ResizeFocused {
-                delta: -self.core.resize_step(),
-            })),
-            KeyCode::Char(']') => Some(RuntimeAction::Core(HypertileAction::ResizeFocused {
-                delta: self.core.resize_step(),
-            })),
-            KeyCode::Char('p') => Some(RuntimeAction::OpenPalette),
             _ => None,
         }
     }

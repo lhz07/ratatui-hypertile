@@ -22,7 +22,7 @@ cargo run -p ratatui-hypertile-extras --example basic --release
 cargo run --example core_only
 ```
 
-**Keys:**
+## Keys
 
 ### General
 
@@ -32,49 +32,37 @@ cargo run --example core_only
 
 ### Block
 
-| Key             | Operation                                                             |
-| --------------- | --------------------------------------------------------------------- |
-| p               | open new block                                                        |
-| d               | close focused block                                                   |
-| f               | toggle fullscreen                                                     |
-| t               | split focused block automatically                                     |
-| s/v             | split focused block horizontally/vertically                           |
-| [ / ]           | resize focused block                                                  |
-| h/j/k/l         | focus                                                                 |
-| Shift + h/j/k/l | move block                                                            |
-| Ctrl + g        | toggle transparent input (means every key will be sent to this block) |
+| Key                   | Operation                                                             |
+| --------------------- | --------------------------------------------------------------------- |
+| Alt + p               | open palette                                                          |
+| Alt + q               | close focused block                                                   |
+| Alt + d               | toggle maximize                                                       |
+| Alt + t               | split focused block automatically                                     |
+| Alt + s/v             | split focused block horizontally/vertically                           |
+| Alt + -/=             | resize focused block                                                  |
+| Alt + h/j/k/l         | focus                                                                 |
+| Alt + Shift + h/j/k/l | move block                                                            |
+| Ctrl + g              | toggle transparent input (means every key will be sent to this block) |
 
 ### Workspace
 
-| Key       | Operation                    |
-| --------- | ---------------------------- |
-| Ctrl + t  | create new workspace         |
-| Ctrl + w  | close current workspace      |
-| 0-9       | switch to specific workspace |
-| Alt + ←/→ | switch workspace             |
+| Key            | Operation                    |
+| -------------- | ---------------------------- |
+| Ctrl + Alt + t | create new workspace         |
+| Ctrl + Alt + w | close current workspace      |
+| Alt + 0-9      | switch to specific workspace |
+| Alt + ←/→      | switch workspace             |
 
-## Quickstart
+### Unimplemented (will support soon)
 
-```toml
-# just the layout engine
-ratatui-hypertile = "0.3"
-
-# or the full runtime with plugins
-ratatui-hypertile-extras = "0.3"
-```
-
-```rust
-use ratatui::layout::Direction;
-use ratatui_hypertile::Hypertile;
-
-let mut layout = Hypertile::new();
-let pane = layout.split_focused(Direction::Horizontal).unwrap();
-
-layout.compute_layout(area);
-for pane in layout.panes_iter() {
-    // pane.id, pane.rect, pane.is_focused
-}
-```
+| Key               | Operation                    |
+| ----------------- | ---------------------------- |
+| Alt + Shift + 0-9 | send to specific workspace   |
+| Alt + Shift + ←/→ | send to left/right workspace |
+| Alt + e           | open fish                    |
+| Alt + f           | toggle fullscreen            |
+| Alt + /           | toggle cheatsheet            |
+| Alt + j           | toggle top bar               |
 
 ## License
 

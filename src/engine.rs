@@ -262,7 +262,7 @@ impl Hypertile {
                 self.split_focused(Some(direction))?;
                 true
             }
-            HypertileAction::FocusFull => self.state.toggle_focused_full()?,
+            HypertileAction::FocusMax => self.state.toggle_focused_full()?,
             HypertileAction::CloseFocused => {
                 self.close_focused()?;
                 true
