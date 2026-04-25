@@ -15,7 +15,7 @@ pub(crate) mod workspace;
 
 use crate::registry::{HypertilePlugin, Registry};
 use ::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
-use ratatui::layout::{Direction, Rect};
+use ratatui::layout::{Direction, Position, Rect};
 use ratatui_hypertile::{
     EventOutcome, Hypertile as CoreHypertile, HypertileAction, HypertileEvent, PaneId,
     PaneSnapshot, raw, raw::Node as CoreNode,
@@ -324,7 +324,13 @@ impl HypertileRuntime {
                     }
 
                     match self.mode {
-                        InputMode::Layout => self.handle_layout_key(*chord),
+                        InputMode::Layout => {
+                            if !self.handle_layout_key(*chord)?.is_consumed() {
+                                Ok(self.forward_to_plugin(event))
+                            } else {
+                                Ok(EventOutcome::Consumed)
+                            }
+                        }
                         InputMode::PluginInput => Ok(self.forward_to_plugin(event)),
                     }
                 }
@@ -334,6 +340,22 @@ impl HypertileRuntime {
                 Event::Mouse(mouse) => match mouse.kind {
                     MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
                         Ok(self.forward_to_plugin(event))
+                    }
+                    MouseEventKind::Moved => {
+                        let pos = Position::new(mouse.column, mouse.row);
+                        let panes = self.core.state().panes();
+                        let mut focus_id = None;
+                        for (id, area) in panes {
+                            if area.contains(pos) {
+                                focus_id = Some(id);
+                                break;
+                            }
+                        }
+                        if let Some(id) = focus_id {
+                            self.focus_pane(id)?;
+                        }
+
+                        Ok(EventOutcome::Consumed)
                     }
                     _ => Ok(EventOutcome::Ignored),
                 },
@@ -359,7 +381,6 @@ impl HypertileRuntime {
                 self.handle_split_shortcut(None)
             }
             Some(RuntimeAction::OpenPalette) if !self.core.state().is_full() => self.open_palette(),
-            Some(RuntimeAction::InteractFocused) => self.handle_interact_focused(),
             _ => Ok(EventOutcome::Ignored),
         }
     }
@@ -382,20 +403,6 @@ impl HypertileRuntime {
             }
         }
         Ok(EventOutcome::Consumed)
-    }
-
-    fn handle_interact_focused(&mut self) -> Result<EventOutcome, RuntimeError> {
-        let Some(pane_id) = self.core.focused_pane() else {
-            return Ok(EventOutcome::Ignored);
-        };
-
-        match self.registry.plugin_type_for(pane_id) {
-            None | Some(DEFAULT_PLUGIN_TYPE) => self.open_palette_for_target(Some(pane_id)),
-            Some(_) => {
-                self.mode = InputMode::PluginInput;
-                Ok(EventOutcome::Consumed)
-            }
-        }
     }
 
     fn forward_to_plugin(&mut self, event: &mut HypertileEvent) -> EventOutcome {

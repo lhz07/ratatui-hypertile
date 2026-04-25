@@ -9,7 +9,6 @@ pub(super) enum RuntimeAction {
     SplitDirection(Direction),
     SplitDefault,
     OpenPalette,
-    InteractFocused,
 }
 
 /// Movement key preset for layout mode.
@@ -122,7 +121,6 @@ impl HypertileRuntime {
                 delta: self.core.resize_step(),
             })),
             KeyCode::Char('p') => Some(RuntimeAction::OpenPalette),
-            KeyCode::Enter => Some(RuntimeAction::InteractFocused),
             _ => None,
         }
     }

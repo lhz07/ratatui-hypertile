@@ -6,7 +6,7 @@ use std::{
     time::{Duration, Instant},
 };
 
-use crate::{AnimationConfig, runtime::animation::SpaceAnimation};
+use crate::{AnimationConfig, InputMode, runtime::animation::SpaceAnimation};
 
 use super::HypertileRuntime;
 
@@ -200,7 +200,8 @@ impl WorkspaceRuntime {
     /// are reserved for tab management. Everything else goes to the active
     /// runtime.
     pub fn handle_event(&mut self, mut event: HypertileEvent) -> EventOutcome {
-        if self.tabs[self.active].runtime.handle_event(&mut event) == EventOutcome::Consumed {
+        if self.tabs[self.active].runtime.mode() == InputMode::PluginInput {
+            self.tabs[self.active].runtime.handle_event(&mut event);
             return EventOutcome::Consumed;
         }
         if let HypertileEvent::Term(term) = &event
@@ -263,7 +264,6 @@ impl WorkspaceRuntime {
             && !ani.is_finished(Instant::now())
             && let HypertileEvent::Tick = event
         {
-            let mut event = event;
             let (left, right) = ani.get_workspaces();
             if left != self.active
                 && let Some(tab) = self.tabs.get_mut(left)
@@ -276,7 +276,7 @@ impl WorkspaceRuntime {
                 tab.runtime.handle_event(&mut event);
             }
         }
-        EventOutcome::Ignored
+        self.tabs[self.active].runtime.handle_event(&mut event)
     }
 
     pub fn render(&mut self, area: Rect, buf: &mut Buffer) {
