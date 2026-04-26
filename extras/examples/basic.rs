@@ -42,7 +42,9 @@ fn build_runtime() -> HypertileRuntime {
         text: String::new(),
     });
     rt.register_plugin_type("network", || NetworkPlugin { tick: 0 });
-    rt.register_plugin_type("fish", || PtyPlugin::new());
+    rt.register_plugin_type("fish", || PtyPlugin::new("fish".to_string()));
+    rt.register_plugin_type("zsh", || PtyPlugin::new("zsh".to_string()));
+    rt.register_plugin_type("bash", || PtyPlugin::new("bash".to_string()));
     rt
 }
 

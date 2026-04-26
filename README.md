@@ -37,6 +37,7 @@ cargo run --example core_only
 | Alt + p               | open palette                                                          |
 | Alt + q               | close focused block                                                   |
 | Alt + d               | toggle maximize                                                       |
+| Alt + e               | open fish                                                             |
 | Alt + t               | split focused block automatically                                     |
 | Alt + s/v             | split focused block horizontally/vertically                           |
 | Alt + -/=             | resize focused block                                                  |
@@ -59,7 +60,6 @@ cargo run --example core_only
 | ----------------- | ---------------------------- |
 | Alt + Shift + 0-9 | send to specific workspace   |
 | Alt + Shift + ←/→ | send to left/right workspace |
-| Alt + e           | open fish                    |
 | Alt + f           | toggle fullscreen            |
 | Alt + /           | toggle cheatsheet            |
 | Alt + j           | toggle top bar               |

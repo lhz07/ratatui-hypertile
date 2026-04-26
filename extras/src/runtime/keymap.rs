@@ -9,6 +9,7 @@ pub(super) enum RuntimeAction {
     SplitDirection(Direction),
     SplitDefault,
     OpenPalette,
+    OpenPlugin(&'static str),
 }
 
 /// Movement key preset for layout mode.
@@ -84,6 +85,7 @@ impl HypertileRuntime {
                 Some(RuntimeAction::Core(HypertileAction::CloseFocused))
             }
             (KeyModifiers::ALT, KeyCode::Char('t')) => Some(RuntimeAction::SplitDefault),
+            (KeyModifiers::ALT, KeyCode::Char('e')) => Some(RuntimeAction::OpenPlugin("fish")),
             (KeyModifiers::ALT, KeyCode::Char('s')) => {
                 Some(RuntimeAction::SplitDirection(Direction::Horizontal))
             }

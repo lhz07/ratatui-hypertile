@@ -374,16 +374,24 @@ impl HypertileRuntime {
                     RuntimeAction::Core(action) => {
                         self.apply_core_action(action);
                     }
-                    RuntimeAction::SplitDirection(direction) if !self.core.state().is_full() => {
-                        self.handle_split_shortcut(Some(direction))?;
+                    RuntimeAction::SplitDirection(direction) => {
+                        if !self.core.state().is_full() {
+                            self.handle_split_shortcut(Some(direction))?;
+                        }
                     }
-                    RuntimeAction::SplitDefault if !self.core.state().is_full() => {
-                        self.handle_split_shortcut(None)?;
+                    RuntimeAction::SplitDefault => {
+                        if !self.core.state().is_full() {
+                            self.handle_split_shortcut(None)?;
+                        }
                     }
-                    RuntimeAction::OpenPalette if !self.core.state().is_full() => {
-                        let _ = self.open_palette();
+                    RuntimeAction::OpenPalette => {
+                        if !self.core.state().is_full() {
+                            let _ = self.open_palette();
+                        }
                     }
-                    _ => (),
+                    RuntimeAction::OpenPlugin(plugin_type) => {
+                        self.split_focused(None, plugin_type)?;
+                    }
                 }
                 Ok(EventOutcome::Consumed)
             }

@@ -36,11 +36,15 @@ use wezterm_term::{
 #[derive(Default)]
 pub struct PtyPlugin {
     mounted: Option<MountedPty>,
+    program: String,
 }
 
 impl PtyPlugin {
-    pub fn new() -> Self {
-        Self::default()
+    pub fn new(program: String) -> Self {
+        Self {
+            mounted: None,
+            program,
+        }
     }
     pub fn close(&mut self) {
         // TODO: terminate gracefully
@@ -207,7 +211,7 @@ impl MountedPty {
         }
     }
 
-    pub fn create(area: Rect) -> anyhow::Result<Self> {
+    pub fn create(area: Rect, program: &str) -> anyhow::Result<Self> {
         let rows = area.height.max(MIN_ROW);
         let cols = area.width.max(MIN_COL);
         let pty = NativePtySystem::default();
@@ -216,7 +220,7 @@ impl MountedPty {
             cols,
             ..Default::default()
         })?;
-        let child = root.slave.spawn_command(CommandBuilder::new("fish"))?;
+        let child = root.slave.spawn_command(CommandBuilder::new(program))?;
         let fd = root.master.as_raw_fd().expect("valid on macOS");
         unsafe {
             // set nonblocking
@@ -236,6 +240,7 @@ impl MountedPty {
         };
         let mut view_row = 0i64;
         let writer = AsyncWriteAdapter::new(input_tx);
+        let program = program.to_string();
         tokio_spawn(async move {
             let res: Result<(), anyhow::Error> = async {
                 let async_fd = AsyncFd::new(fd)?;
@@ -276,7 +281,7 @@ impl MountedPty {
                         }
                         // no more to read, render it
                         Some(msg) = render_rx.recv() => {
-                            handle_msg(msg, &mut terminal, &mut size, &mut view_row);
+                            handle_msg(msg, &mut terminal, &mut size, &mut view_row, &program);
                         }
                         else => {
                             break;
@@ -306,14 +311,15 @@ fn handle_msg(
     terminal: &mut TerminalState,
     size: &mut TerminalSize,
     view_row: &mut i64,
+    program: &str,
 ) {
     match msg {
         RenderMsg::RenderScreen(area, mut buf, tx, is_focused) => {
             let title = terminal.get_title();
             let title = if !title.is_empty() {
-                format!(" fish {title} ")
+                format!(" {program} {title} ")
             } else {
-                format!(" fish ")
+                format!(" {program} ")
             };
             let block = pane_block(title, is_focused, Color::Blue);
             let term = TerminalWidget::new(&terminal, *view_row);
@@ -424,7 +430,7 @@ impl HypertilePlugin for PtyPlugin {
                 }
                 pty
             }
-            None => match MountedPty::create(term_area) {
+            None => match MountedPty::create(term_area, &self.program) {
                 Ok(mounted) => self.mounted.insert(mounted),
                 Err(e) => {
                     log::error!("{e}");

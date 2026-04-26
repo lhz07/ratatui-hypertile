@@ -4,7 +4,6 @@ use crate::runtime::constants::{
 };
 use crate::runtime::{HypertileRuntime, RuntimeError};
 use crossterm::event::{Event, KeyCode, KeyEvent};
-use ratatui::layout::Direction;
 use ratatui_hypertile::{EventOutcome, HypertileEvent, PaneId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -197,8 +196,7 @@ impl HypertileRuntime {
                         EventOutcome::Consumed
                     }))
                 } else {
-                    let direction = self.auto_split_direction();
-                    Some(self.split_focused(Some(direction), &plugin_type).map(|_| {
+                    Some(self.split_focused(None, &plugin_type).map(|_| {
                         self.palette.show = false;
                         EventOutcome::Consumed
                     }))
@@ -227,20 +225,6 @@ impl HypertileRuntime {
             HypertileEvent::Tick => None,
             _ => Some(Ok(EventOutcome::Consumed)),
         }
-    }
-
-    pub(super) fn auto_split_direction(&self) -> Direction {
-        self.core
-            .focused_pane()
-            .and_then(|id| self.core.pane_rect(id))
-            .map(|rect| {
-                if rect.width >= rect.height {
-                    Direction::Horizontal
-                } else {
-                    Direction::Vertical
-                }
-            })
-            .unwrap_or(Direction::Horizontal)
     }
 }
 
