@@ -102,9 +102,11 @@ fn run(
             let [mode_area, hint_area] =
                 Layout::horizontal([Constraint::Length(10), Constraint::Min(0)]).areas(footer);
             ModeIndicator::new(rt.mode()).render(mode_area, frame.buffer_mut());
-            Paragraph::new("  Ctrl+t/w: tab | s/v: split | d: close | p: palette | Ctrl+g: input | Ctrl+Alt+c: quit")
-                .style(Style::default().fg(Color::DarkGray))
-                .render(hint_area, frame.buffer_mut());
+            Paragraph::new(
+                "Ctrl+Alt+c: quit | Alt+←/→: workspace | Alt+t: split | Alt+q: close | Alt+p: palette",
+            )
+            .style(Style::default().fg(Color::DarkGray))
+            .render(hint_area, frame.buffer_mut());
         })?;
 
         // let timeout = workspace.next_frame_in().map_or_else(

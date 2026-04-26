@@ -114,7 +114,7 @@ impl WorkspaceRuntime {
             label: None,
             runtime,
         });
-        self.active = self.tabs.len() - 1;
+        self.go_to_tab(self.tabs.len() - 1);
     }
 
     /// Does nothing if this is the last tab or the index is out of range.
@@ -130,13 +130,14 @@ impl WorkspaceRuntime {
         }
     }
 
-    pub fn next_tab(&mut self) {
+    pub fn next_tab(&mut self) -> bool {
         if self.active + 1 >= self.tabs.len() {
-            return;
+            return false;
         }
         let new = self.active + 1;
         self.start_animation(new);
         self.active = new;
+        true
     }
 
     pub fn prev_tab(&mut self) {
@@ -187,7 +188,9 @@ impl WorkspaceRuntime {
         match action {
             WorkspaceAction::NewTab => self.new_tab(),
             WorkspaceAction::CloseTab(i) => self.close_tab(i),
-            WorkspaceAction::NextTab => self.next_tab(),
+            WorkspaceAction::NextTab => {
+                self.next_tab();
+            }
             WorkspaceAction::PrevTab => self.prev_tab(),
             WorkspaceAction::GoToTab(i) => self.go_to_tab(i),
             WorkspaceAction::RenameTab(i, label) => self.rename_tab(i, label),
@@ -223,7 +226,9 @@ impl WorkspaceRuntime {
             } else if chord.modifiers == KeyModifiers::ALT {
                 match chord.code {
                     KeyCode::Right => {
-                        self.next_tab();
+                        if !self.next_tab() {
+                            self.new_tab();
+                        }
                         return EventOutcome::Consumed;
                     }
                     KeyCode::Left => {
@@ -283,6 +288,7 @@ impl WorkspaceRuntime {
                 self.animation.take();
             }
         }
+
         self.tabs[self.active].runtime.render(area, buf);
     }
 }
