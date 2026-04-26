@@ -1,5 +1,5 @@
 use crate::core::helpers::{node_at_path, node_mut_at_path, normalize_ratio};
-use crate::core::{CELL_RATIO, Node, PaneId, StateError};
+use crate::core::{CellInfo, Node, PaneId, StateError};
 use ratatui::layout::Direction;
 
 use super::HypertileState;
@@ -138,7 +138,7 @@ impl HypertileState {
             .iter()
             .find(|(id, _)| *id == node)
             .ok_or(StateError::UnknownPaneId(node))?;
-        let direction = if rect.width as f64 >= rect.height as f64 * *CELL_RATIO {
+        let direction = if rect.width as f64 >= rect.height as f64 * CellInfo::ratio() {
             Direction::Horizontal
         } else {
             Direction::Vertical

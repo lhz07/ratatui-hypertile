@@ -33,7 +33,7 @@ mod input;
 mod types;
 mod widget;
 
-pub use crate::core::{PaneId, StateError};
+pub use crate::core::{CellInfo, PaneId, StateError};
 pub use crate::engine::{Hypertile, HypertileBuilder};
 pub use crate::input::{EventOutcome, HypertileAction, HypertileEvent, MoveScope, Towards};
 pub use crate::types::{PaneSnapshot, SplitPolicy};

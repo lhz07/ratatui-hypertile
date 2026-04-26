@@ -12,7 +12,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
 };
-use ratatui_hypertile::HypertileEvent;
+use ratatui_hypertile::{CellInfo, HypertileEvent};
 use std::{
     io::{self},
     mem,
@@ -231,13 +231,7 @@ impl MountedPty {
         }
         let (render_tx, mut render_rx) = mpsc::channel::<RenderMsg>(100);
         let (input_tx, mut input_rx) = mpsc::unbounded_channel::<InputMsg>();
-        let mut size = TerminalSize {
-            rows: rows as usize,
-            cols: cols as usize,
-            pixel_width: 0,
-            pixel_height: 0,
-            dpi: 96,
-        };
+        let mut size = TerminalSize::new(cols, rows);
         let mut view_row = 0i64;
         let writer = AsyncWriteAdapter::new(input_tx);
         let program = program.to_string();
@@ -333,8 +327,7 @@ fn handle_msg(
             }
         }
         RenderMsg::SetSize(rect) => {
-            size.cols = rect.width as usize;
-            size.rows = rect.height as usize;
+            size.resize(rect.width, rect.height);
             terminal.resize(*size);
         }
         RenderMsg::Event(event) => {
@@ -381,12 +374,39 @@ fn handle_msg(
     }
 }
 
+trait Resize {
+    fn new(cols: u16, rows: u16) -> Self;
+    fn resize(&mut self, cols: u16, rows: u16);
+}
+
+impl Resize for TerminalSize {
+    fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            rows: rows as usize,
+            cols: cols as usize,
+            pixel_width: CellInfo::pixel_width(cols) as usize,
+            pixel_height: CellInfo::pixel_height(rows) as usize,
+            dpi: 96,
+        }
+    }
+    fn resize(&mut self, cols: u16, rows: u16) {
+        self.cols = cols as usize;
+        self.rows = rows as usize;
+        self.pixel_width = CellInfo::pixel_width(cols) as usize;
+        self.pixel_height = CellInfo::pixel_height(rows) as usize;
+    }
+}
+
 #[derive(Debug)]
 struct SimpleTermConfig;
 
 impl TerminalConfiguration for SimpleTermConfig {
     fn scrollback_size(&self) -> usize {
-        100
+        1000
+    }
+
+    fn enable_kitty_graphics(&self) -> bool {
+        true
     }
 
     fn color_palette(&self) -> wezterm_term::color::ColorPalette {

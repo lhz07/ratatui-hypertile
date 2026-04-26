@@ -334,9 +334,9 @@ impl HypertileRuntime {
                     }
                 }
                 Event::Mouse(mouse) => match mouse.kind {
-                    MouseEventKind::ScrollDown | MouseEventKind::ScrollUp => {
-                        Ok(self.forward_to_plugin(event))
-                    }
+                    MouseEventKind::ScrollDown
+                    | MouseEventKind::ScrollUp
+                    | MouseEventKind::Down(_) => Ok(self.forward_to_plugin(event)),
                     MouseEventKind::Moved => {
                         let pos = Position::new(mouse.column, mouse.row);
                         let panes = self.core.state().panes();
