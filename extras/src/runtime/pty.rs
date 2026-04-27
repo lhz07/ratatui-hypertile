@@ -3,6 +3,7 @@ use crossterm::event::{
     self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
     KeyEventKind, KeyModifiers as CrosstermModifiers,
 };
+use image::{DynamicImage, RgbaImage};
 use portable_pty::{Child, CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
 use ratatui::{
     buffer::Buffer,
@@ -10,17 +11,25 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::border,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, Widget},
+    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
 use ratatui_hypertile::{CellInfo, HypertileEvent};
+use ratatui_image::{
+    StatefulImage,
+    picker::{Picker, ProtocolType},
+    protocol::StatefulProtocol,
+};
 use std::{
+    borrow::Cow,
+    collections::HashMap,
+    env,
     io::{self},
     mem,
     pin::Pin,
-    sync::Arc,
+    sync::{Arc, LazyLock},
     task::{Poll, ready},
 };
-use termwiz::color::ColorAttribute;
+use termwiz::{color::ColorAttribute, image::ImageDataType};
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, unix::AsyncFd},
     sync::{
@@ -29,13 +38,12 @@ use tokio::{
     },
 };
 use wezterm_cell::{Cell, Intensity};
-use wezterm_term::{
-    KeyCode, KeyModifiers, Terminal, TerminalConfiguration, TerminalSize, TerminalState,
-};
+use wezterm_term::{KeyCode, KeyModifiers, Terminal, TerminalConfiguration, TerminalSize};
 
 #[derive(Default)]
 pub struct PtyPlugin {
     mounted: Option<MountedPty>,
+    is_closed: bool,
     program: String,
 }
 
@@ -43,6 +51,7 @@ impl PtyPlugin {
     pub fn new(program: String) -> Self {
         Self {
             mounted: None,
+            is_closed: false,
             program,
         }
     }
@@ -57,6 +66,7 @@ impl PtyPlugin {
             //     Err(e) => log::error!("child exit: {e}"),
             // }
         }
+        self.is_closed = true;
     }
 }
 
@@ -231,8 +241,7 @@ impl MountedPty {
         }
         let (render_tx, mut render_rx) = mpsc::channel::<RenderMsg>(100);
         let (input_tx, mut input_rx) = mpsc::unbounded_channel::<InputMsg>();
-        let mut size = TerminalSize::new(cols, rows);
-        let mut view_row = 0i64;
+        let size = TerminalSize::new(cols, rows);
         let writer = AsyncWriteAdapter::new(input_tx);
         let program = program.to_string();
         tokio_spawn(async move {
@@ -256,7 +265,8 @@ impl MountedPty {
                     }
                 });
                 let config = Arc::new(SimpleTermConfig);
-                let mut terminal = Terminal::new(size, config, "", "", Box::new(writer));
+                let terminal = Terminal::new(size, config, "", "", Box::new(writer));
+                let mut state = TerminalState::new(terminal, program, size);
                 let mut buf = [0; 8192];
                 loop {
                     tokio::select! {
@@ -267,7 +277,7 @@ impl MountedPty {
                             let n = res?;
                             if n != 0{
                                 // update
-                                terminal.advance_bytes(&buf[..n]);
+                                state.terminal.advance_bytes(&buf[..n]);
                             } else {
                                 // exit now!
                                 break;
@@ -275,7 +285,7 @@ impl MountedPty {
                         }
                         // no more to read, render it
                         Some(msg) = render_rx.recv() => {
-                            handle_msg(msg, &mut terminal, &mut size, &mut view_row, &program);
+                            handle_msg(msg, &mut state);
                         }
                         else => {
                             break;
@@ -288,6 +298,8 @@ impl MountedPty {
             // log error
             if let Err(e) = res {
                 log::error!("pty output: {e}")
+            } else {
+                log::debug!("pty output finished");
             }
         });
 
@@ -300,23 +312,17 @@ impl MountedPty {
     }
 }
 
-fn handle_msg(
-    msg: RenderMsg,
-    terminal: &mut TerminalState,
-    size: &mut TerminalSize,
-    view_row: &mut i64,
-    program: &str,
-) {
+fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
     match msg {
         RenderMsg::RenderScreen(area, mut buf, tx, is_focused) => {
-            let title = terminal.get_title();
+            let title = state.terminal.get_title();
             let title = if !title.is_empty() {
-                format!(" {program} {title} ")
+                format!(" {} {title} ", state.program)
             } else {
-                format!(" {program} ")
+                format!(" {} ", state.program)
             };
             let block = pane_block(title, is_focused, Color::Blue);
-            let term = TerminalWidget::new(&terminal, *view_row);
+            let term = TerminalWidget::new(state);
             // let ins = std::time::Instant::now();
             term.render(block.inner(area), &mut buf);
             // about 50 - 500 micro seconds
@@ -327,8 +333,7 @@ fn handle_msg(
             }
         }
         RenderMsg::SetSize(rect) => {
-            size.resize(rect.width, rect.height);
-            terminal.resize(*size);
+            state.resize(rect.width, rect.height);
         }
         RenderMsg::Event(event) => {
             if let HypertileEvent::Term(term_event) = event {
@@ -338,20 +343,20 @@ fn handle_msg(
                     {
                         match key_event.kind {
                             KeyEventKind::Press => {
-                                let _ = terminal.key_down(key, mods);
+                                let _ = state.terminal.key_down(key, mods);
                             }
 
                             KeyEventKind::Release => {
-                                let _ = terminal.key_up(key, mods);
+                                let _ = state.terminal.key_up(key, mods);
                             }
                             KeyEventKind::Repeat => {
-                                let _ = terminal.key_down(key, mods);
-                                let _ = terminal.key_up(key, mods);
+                                let _ = state.terminal.key_down(key, mods);
+                                let _ = state.terminal.key_up(key, mods);
                             }
                         }
                     }
                     CrosstermEvent::Paste(s) => {
-                        if let Err(e) = terminal.send_paste(&s) {
+                        if let Err(e) = state.terminal.send_paste(&s) {
                             log::error!("paste: {e}");
                         }
                     }
@@ -361,10 +366,10 @@ fn handle_msg(
                             event::MouseEventKind::ScrollUp => -1,
                             _ => return,
                         };
-                        let new = *view_row + offset;
-                        let invisible = terminal.screen().phys_row(0);
+                        let new = state.view_row + offset;
+                        let invisible = state.terminal.screen().phys_row(0);
                         if new <= 0 && new >= -(invisible as i64) {
-                            *view_row = new;
+                            state.view_row = new;
                         }
                     }
                     _ => (),
@@ -374,12 +379,12 @@ fn handle_msg(
     }
 }
 
-trait Resize {
+trait ResizeTrait {
     fn new(cols: u16, rows: u16) -> Self;
     fn resize(&mut self, cols: u16, rows: u16);
 }
 
-impl Resize for TerminalSize {
+impl ResizeTrait for TerminalSize {
     fn new(cols: u16, rows: u16) -> Self {
         Self {
             rows: rows as usize,
@@ -416,13 +421,17 @@ impl TerminalConfiguration for SimpleTermConfig {
 
 impl HypertilePlugin for PtyPlugin {
     fn is_closed(&mut self) -> bool {
-        self.mounted.is_none()
+        self.is_closed
     }
     fn on_event(
         &mut self,
         event: &mut ratatui_hypertile::HypertileEvent,
     ) -> ratatui_hypertile::EventOutcome {
-        let Some(pty) = &mut self.mounted else {
+        let pty = if let Some(pty) = &mut self.mounted
+            && !self.is_closed
+        {
+            pty
+        } else {
             return ratatui_hypertile::EventOutcome::Ignored;
         };
         let mut send_event = HypertileEvent::Tick;
@@ -439,6 +448,9 @@ impl HypertilePlugin for PtyPlugin {
         is_focused: bool,
         target_rect: Option<Rect>,
     ) {
+        if self.is_closed {
+            return;
+        }
         let block = pane_block("Terminal", is_focused, Color::Blue);
         let term_area = block.inner(area);
         let pty = match &mut self.mounted {
@@ -487,30 +499,128 @@ impl HypertilePlugin for PtyPlugin {
     }
 }
 
-/// 将 WezTerm 的屏幕转换为 Ratatui 可渲染的内容
-pub struct TerminalRenderer<'a> {
-    terminal: &'a TerminalState,
-    view_row: i64,
+#[derive(Debug, Clone, Copy)]
+pub struct CursorInfo {
+    pub x: usize,
+    pub y: usize,
+    pub shape: wezterm_surface::CursorShape,
+    pub visibility: wezterm_surface::CursorVisibility,
 }
 
-impl<'a> TerminalRenderer<'a> {
-    pub fn new(terminal: &'a TerminalState, view_row: i64) -> Self {
-        Self { terminal, view_row }
-    }
+pub struct TerminalWidget<'a> {
+    state: &'a mut TerminalState,
+}
 
+impl<'a> TerminalWidget<'a> {
+    fn new(state: &'a mut TerminalState) -> Self {
+        Self { state }
+    }
+}
+
+struct Image {
+    row: u16,
+    col: u16,
+    width: u32,
+    height: u32,
+    state: StatefulProtocol,
+    area: Option<Rect>,
+}
+
+impl Image {
+    fn relative(&self, reference: Rect) -> Option<Rect> {
+        let mut rect = self.area?;
+        rect.x += reference.x;
+        rect.y += reference.y;
+        Some(rect)
+    }
+}
+
+struct TerminalState {
+    view_row: i64,
+    size: TerminalSize,
+    terminal: Terminal,
+    program: String,
+    images: HashMap<u64, Image>,
+}
+
+impl TerminalState {
+    pub fn new(terminal: Terminal, program: String, size: TerminalSize) -> Self {
+        Self {
+            view_row: 0,
+            terminal,
+            program,
+            size,
+            images: HashMap::new(),
+        }
+    }
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.size.resize(cols, rows);
+        self.terminal.resize(self.size);
+    }
     /// 将终端屏幕转换为 Ratatui 的 Line
-    pub fn render_screen(&self) -> Vec<Line<'static>> {
+    pub fn render_screen(&mut self) -> Vec<Line<'static>> {
         let screen = self.terminal.screen();
         let mut lines = Vec::new();
         let phys_row = screen.phys_row(0);
         let start = phys_row.saturating_sub(self.view_row.abs() as usize);
         let end = start + self.terminal.get_size().rows;
         // 遍历所有可见行
-        for line in screen.lines_in_phys_range(start..end) {
+        for (rows, line) in screen.lines_in_phys_range(start..end).iter().enumerate() {
             let mut spans = Vec::new();
 
             // 遍历该行中的所有 cell
-            for cell in line.visible_cells() {
+            for (cols, cell) in line.visible_cells().enumerate() {
+                if let Some(images) = cell.attrs().images() {
+                    for img_cell in images {
+                        let cols = cols + 2;
+                        let data = &*img_cell.image_data().data();
+                        let hash = img_cell.simple_hash();
+                        match self.images.get_mut(&hash) {
+                            Some(image) => {
+                                // TODO: implement crop logic
+                                if let Some(rect) = &mut image.area {
+                                    rect.x = rect.x.min(cols as u16);
+                                    rect.y = rect.y.min(rows as u16);
+                                } else {
+                                    image.area = Some(Rect {
+                                        x: cols as u16,
+                                        y: rows as u16,
+                                        width: image.col,
+                                        height: image.row,
+                                    })
+                                }
+                            }
+                            None => match to_dynamic_image(data) {
+                                Ok(img) => {
+                                    // log::info!("new image: {:#?}", img_cell);
+                                    let width = img.width();
+                                    let col = width as f64 / CellInfo::width();
+                                    let height = img.height();
+                                    let row = height as f64 / CellInfo::height();
+                                    let state = PICKER.new_resize_protocol(img);
+                                    let img = Image {
+                                        row: row.round() as u16,
+                                        col: col.round() as u16,
+                                        height,
+                                        width,
+                                        state,
+                                        area: Some(Rect::new(
+                                            cols as u16,
+                                            rows as u16,
+                                            col.round() as u16,
+                                            row.round() as u16,
+                                        )),
+                                    };
+                                    self.images.insert(hash, img);
+                                }
+                                Err(e) => {
+                                    log::error!("{e}");
+                                }
+                            },
+                        }
+                    }
+                    continue;
+                }
                 let span = self.cell_to_span(&cell.as_cell());
                 spans.push(span);
             }
@@ -617,23 +727,22 @@ impl<'a> TerminalRenderer<'a> {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
-pub struct CursorInfo {
-    pub x: usize,
-    pub y: usize,
-    pub shape: wezterm_surface::CursorShape,
-    pub visibility: wezterm_surface::CursorVisibility,
-}
-
-pub struct TerminalWidget<'a> {
-    renderer: TerminalRenderer<'a>,
-}
-
-impl<'a> TerminalWidget<'a> {
-    pub fn new(terminal: &'a TerminalState, view_row: i64) -> Self {
-        Self {
-            renderer: TerminalRenderer::new(terminal, view_row),
-        }
+pub fn to_dynamic_image(data: &ImageDataType) -> Result<DynamicImage, Cow<'static, str>> {
+    match data {
+        ImageDataType::Rgba8 {
+            data,
+            width,
+            height,
+            hash: _,
+        } => Ok(DynamicImage::ImageRgba8(
+            RgbaImage::from_raw(*width, *height, data.clone())
+                .ok_or("error loading img from raw")?,
+        )),
+        ImageDataType::EncodedFile(data) => match image::load_from_memory(&data) {
+            Ok(img) => Ok(img),
+            Err(e) => Err(format!("can not load img from memory: {e}").into()),
+        },
+        _ => Err("unsupported format".into()),
     }
 }
 
@@ -643,17 +752,51 @@ impl Widget for TerminalWidget<'_> {
             return;
         }
 
-        let lines = self.renderer.render_screen();
+        let lines = self.state.render_screen();
 
-        let paragraph = Paragraph::new(lines).scroll((0, 0)); // 可以根据需要调整滚动位置
+        let paragraph = Paragraph::new(lines).scroll((0, 0));
 
         paragraph.render(area, buf);
 
-        let cursor_info = self.renderer.get_cursor_info();
+        let cursor_info = self.state.get_cursor_info();
         if cursor_info.visibility == wezterm_surface::CursorVisibility::Visible {
             Self::draw_cursor(area, buf, cursor_info);
         }
+
+        for image in self.state.images.values_mut() {
+            if let Some(area) = image.relative(area) {
+                // log::info!("area: {:?}", area);
+                StatefulImage::default().render(area, buf, &mut image.state);
+                image.area.take();
+            } else {
+                // log::info!("empty area: {:?}", area);
+            }
+        }
+        // log::info!("================");
     }
+}
+
+pub static PICKER: LazyLock<Picker> = LazyLock::new(|| {
+    let mut picker = Picker::from_query_stdio().expect("can not detect img protocol");
+    // it recognizes iTerm as kitty...
+    log::info!("type: {:?}", picker.protocol_type());
+    if picker.protocol_type() == ProtocolType::Kitty
+        && let Some(proto) = iterm2_from_env()
+    {
+        picker.set_protocol_type(proto);
+        log::info!("force set type: {:?}", picker.protocol_type());
+    }
+    picker
+});
+
+fn iterm2_from_env() -> Option<ProtocolType> {
+    if env::var("TERM_PROGRAM").is_ok_and(|term_program| term_program.contains("iTerm")) {
+        return Some(ProtocolType::Iterm2);
+    }
+    if env::var("LC_TERMINAL").is_ok_and(|lc_term| lc_term.contains("iTerm")) {
+        return Some(ProtocolType::Iterm2);
+    }
+    None
 }
 
 impl TerminalWidget<'_> {

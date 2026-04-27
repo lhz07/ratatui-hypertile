@@ -38,20 +38,23 @@ pub struct CellInfo {
 }
 
 impl CellInfo {
+    #[inline]
     pub fn width() -> f64 {
         CELL_RATIO.width
     }
-
+    #[inline]
     pub fn height() -> f64 {
         CELL_RATIO.height
     }
-
+    #[inline]
     pub fn ratio() -> f64 {
         CELL_RATIO.ratio
     }
+    #[inline]
     pub fn pixel_width(cols: impl Into<f64>) -> f64 {
         CELL_RATIO.width * cols.into()
     }
+    #[inline]
     pub fn pixel_height(rows: impl Into<f64>) -> f64 {
         CELL_RATIO.height * rows.into()
     }

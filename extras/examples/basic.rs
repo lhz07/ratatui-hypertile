@@ -1,6 +1,9 @@
-use crossterm::event::{
-    self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
-    Event, KeyCode, KeyModifiers,
+use crossterm::{
+    event::{
+        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        Event, KeyCode, KeyModifiers, MouseEventKind,
+    },
+    terminal::EnterAlternateScreen,
 };
 use ratatui::{
     buffer::Buffer,
@@ -13,10 +16,12 @@ use ratatui::{
 use ratatui_hypertile::{EventOutcome, HypertileEvent, PaneId};
 use ratatui_hypertile_extras::{
     AnimationConfig, HypertilePlugin, HypertileRuntime, ModeIndicator, SplitBehavior,
-    WorkspaceRuntime, event_from_crossterm, pty::PtyPlugin,
+    WorkspaceRuntime, event_from_crossterm,
+    pty::{PICKER, PtyPlugin},
 };
 use std::{
     io::{self, stdout},
+    sync::LazyLock,
     time::{Duration, Instant},
 };
 use tui_logger::TuiWidgetState;
@@ -56,6 +61,10 @@ fn main() -> io::Result<()> {
     // Set default level for unknown targets to Trace
     tui_logger::set_default_level(log::LevelFilter::Trace);
     tui_logger::set_env_filter_from_string("basic=trace, ratatui_hypertile_extras=trace");
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(stdout(), EnterAlternateScreen)?;
+    LazyLock::force(&PICKER);
+
     let mut terminal = ratatui::init();
     let mut stdout = stdout();
     // enable bracketed paste
@@ -63,7 +72,6 @@ fn main() -> io::Result<()> {
     crossterm::execute!(stdout, EnableMouseCapture)?;
 
     let mut workspace = WorkspaceRuntime::new(build_runtime);
-
     let rt = workspace.active_runtime_mut();
     let _ = rt.replace_focused_plugin("monitor");
     let _ = rt.split_focused(Some(Direction::Vertical), "logs");
@@ -118,10 +126,13 @@ fn run(
         let timeout = Duration::from_millis(16);
         if event::poll(timeout)? {
             let event = event::read()?;
-            if !matches!(event, Event::Paste(_)) {
-                log::info!("{:?}", event);
-            } else {
-                log::info!("paste event");
+            match event {
+                Event::Mouse(_) => (),
+                Event::Key(key) if key.code == KeyCode::Up || key.code == KeyCode::Down => (),
+                _ => match event {
+                    Event::Paste(_) => log::info!("paste event"),
+                    _ => log::info!("{:?}", event),
+                },
             }
             if let Event::Key(key) = event
                 && key.code == KeyCode::Char('c')
@@ -242,7 +253,8 @@ impl HypertilePlugin for LogsPlugin {
             .style_warn(Style::new().yellow())
             .style_info(Style::new().blue())
             .style_debug(Style::new().magenta())
-            .style_trace(Style::new().gray());
+            .style_trace(Style::new().gray())
+            .output_timestamp(Some("%H:%M:%S.%f".to_string()));
         let logs = widget
             .block(pane_block("Logs", is_focused, Color::Blue))
             .state(&self.log_state);
@@ -250,9 +262,31 @@ impl HypertilePlugin for LogsPlugin {
     }
 
     fn on_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
-        if !matches!(event, HypertileEvent::Tick) {
-            return EventOutcome::Ignored;
+        if let HypertileEvent::Term(term) = event {
+            match term {
+                Event::Mouse(mouse) => match mouse.kind {
+                    MouseEventKind::ScrollDown => self
+                        .log_state
+                        .transition(tui_logger::TuiWidgetEvent::NextPageKey),
+                    MouseEventKind::ScrollUp => {
+                        self.log_state
+                            .transition(tui_logger::TuiWidgetEvent::PrevPageKey);
+                    }
+                    _ => (),
+                },
+                Event::Key(key) => match key.code {
+                    KeyCode::Down => self
+                        .log_state
+                        .transition(tui_logger::TuiWidgetEvent::NextPageKey),
+                    KeyCode::Up => self
+                        .log_state
+                        .transition(tui_logger::TuiWidgetEvent::PrevPageKey),
+                    _ => (),
+                },
+                _ => (),
+            }
         }
+
         // self.tick += 1;
         // let (msg, color) = LOG_ENTRIES[self.tick as usize % LOG_ENTRIES.len()];
         // let h = (self.tick / 3600) % 24;

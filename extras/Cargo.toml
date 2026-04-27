@@ -26,6 +26,9 @@ wezterm-term = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = 
 wezterm-cell = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 wezterm-surface = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 termwiz = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
+ratatui-image = "10.0.6"
+image = "0.25.10"
+
 
 [features]
 default = ["crossterm"]
