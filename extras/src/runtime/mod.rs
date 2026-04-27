@@ -357,6 +357,7 @@ impl HypertileRuntime {
                 },
                 _ => Ok(self.forward_to_plugin(event)),
             },
+            _ => Ok(EventOutcome::Ignored),
         }
     }
 

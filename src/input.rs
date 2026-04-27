@@ -9,6 +9,9 @@ pub enum HypertileEvent {
     Term(Event),
     Action(HypertileAction),
     Tick,
+    AniStart,
+    AniStop,
+    Empty,
 }
 
 /// `Start` means left or up. `End` means right or down.

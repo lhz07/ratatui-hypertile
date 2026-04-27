@@ -275,12 +275,20 @@ impl SpaceAnimation {
         // render left
         if let Some(tab_a) = tabs.get_mut(index_a) {
             let mut buf_a = Buffer::empty(area);
+            tab_a
+                .runtime
+                .registry
+                .broadcast_event(&mut ratatui_hypertile::HypertileEvent::AniStart);
             tab_a.runtime.render(area, &mut buf_a);
             copy_with_offset(&buf_a, main_buffer, area, offset_a);
         }
         // render right
         if let Some(tab_b) = tabs.get_mut(index_b) {
             let mut buf_b = Buffer::empty(area);
+            tab_b
+                .runtime
+                .registry
+                .broadcast_event(&mut ratatui_hypertile::HypertileEvent::AniStart);
             tab_b.runtime.render(area, &mut buf_b);
             copy_with_offset(&buf_b, main_buffer, area, offset_b);
         }

@@ -13,7 +13,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
 };
-use ratatui_hypertile::{CellInfo, HypertileEvent};
+use ratatui_hypertile::{CellInfo, EventOutcome, HypertileEvent};
 use ratatui_image::{
     StatefulImage,
     picker::{Picker, ProtocolType},
@@ -75,6 +75,7 @@ pub struct MountedPty {
     child: Box<dyn Child + Send + Sync>,
     area: Rect,
     animation_active: bool,
+    space_ani_active: bool,
     render_tx: mpsc::Sender<RenderMsg>,
 }
 
@@ -313,6 +314,7 @@ impl MountedPty {
             area,
             render_tx,
             animation_active: false,
+            space_ani_active: false,
         })
     }
 }
@@ -341,52 +343,53 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
             state.resize(rect.width, rect.height);
         }
         RenderMsg::SetDirty => state.dirty = true,
-        RenderMsg::AniStart => state.ani_active = true,
+        RenderMsg::AniStart => state.ani_active += 1,
         RenderMsg::AniStop => {
-            state.ani_active = false;
-            state.dirty = true;
-        }
-        RenderMsg::Event(event) => {
-            if let HypertileEvent::Term(term_event) = event {
-                match term_event {
-                    CrosstermEvent::Key(key_event)
-                        if let Some((key, mods)) = crossterm_to_wezterm(key_event) =>
-                    {
-                        match key_event.kind {
-                            KeyEventKind::Press => {
-                                let _ = state.terminal.key_down(key, mods);
-                            }
-
-                            KeyEventKind::Release => {
-                                let _ = state.terminal.key_up(key, mods);
-                            }
-                            KeyEventKind::Repeat => {
-                                let _ = state.terminal.key_down(key, mods);
-                                let _ = state.terminal.key_up(key, mods);
-                            }
-                        }
-                    }
-                    CrosstermEvent::Paste(s) => {
-                        if let Err(e) = state.terminal.send_paste(&s) {
-                            log::error!("paste: {e}");
-                        }
-                    }
-                    CrosstermEvent::Mouse(mouse) => {
-                        let offset = match mouse.kind {
-                            event::MouseEventKind::ScrollDown => 1,
-                            event::MouseEventKind::ScrollUp => -1,
-                            _ => return,
-                        };
-                        let new = state.view_row + offset;
-                        let invisible = state.terminal.screen().phys_row(0);
-                        if new <= 0 && new >= -(invisible as i64) {
-                            state.view_row = new;
-                        }
-                    }
-                    _ => (),
-                }
+            state.ani_active = state.ani_active.saturating_sub(1);
+            if state.ani_active == 0 {
+                state.dirty = true;
             }
         }
+        RenderMsg::Event(event) => match event {
+            HypertileEvent::Term(term_event) => match term_event {
+                CrosstermEvent::Key(key_event)
+                    if let Some((key, mods)) = crossterm_to_wezterm(key_event) =>
+                {
+                    match key_event.kind {
+                        KeyEventKind::Press => {
+                            let _ = state.terminal.key_down(key, mods);
+                        }
+
+                        KeyEventKind::Release => {
+                            let _ = state.terminal.key_up(key, mods);
+                        }
+                        KeyEventKind::Repeat => {
+                            let _ = state.terminal.key_down(key, mods);
+                            let _ = state.terminal.key_up(key, mods);
+                        }
+                    }
+                }
+                CrosstermEvent::Paste(s) => {
+                    if let Err(e) = state.terminal.send_paste(&s) {
+                        log::error!("paste: {e}");
+                    }
+                }
+                CrosstermEvent::Mouse(mouse) => {
+                    let offset = match mouse.kind {
+                        event::MouseEventKind::ScrollDown => 1,
+                        event::MouseEventKind::ScrollUp => -1,
+                        _ => return,
+                    };
+                    let new = state.view_row + offset;
+                    let invisible = state.terminal.screen().phys_row(0);
+                    if new <= 0 && new >= -(invisible as i64) {
+                        state.view_row = new;
+                    }
+                }
+                _ => (),
+            },
+            _ => (),
+        },
     }
 }
 
@@ -445,12 +448,34 @@ impl HypertilePlugin for PtyPlugin {
         } else {
             return ratatui_hypertile::EventOutcome::Ignored;
         };
-        let mut send_event = HypertileEvent::Tick;
-        mem::swap(&mut send_event, event);
-        // send event
-        let _res = pty.render_tx.try_send(RenderMsg::Event(send_event));
-        // log::info!("send key: {:?}, result: {:?}", key, res);
-        ratatui_hypertile::EventOutcome::Consumed
+        match event {
+            HypertileEvent::AniStart if !pty.space_ani_active => {
+                pty.space_ani_active = true;
+                log::info!("space animation: true");
+
+                if pty.render_tx.try_send(RenderMsg::AniStart).is_err() {
+                    log::error!("can not set animation start");
+                }
+                EventOutcome::Consumed
+            }
+            HypertileEvent::AniStop if pty.space_ani_active => {
+                pty.space_ani_active = false;
+                log::info!("space animation: false");
+
+                if pty.render_tx.try_send(RenderMsg::AniStop).is_err() {
+                    log::error!("can not set animation stop");
+                }
+                EventOutcome::Consumed
+            }
+            _ => {
+                let mut send_event = HypertileEvent::Empty;
+                mem::swap(&mut send_event, event);
+                // send event
+                let _res = pty.render_tx.try_send(RenderMsg::Event(send_event));
+                // log::info!("send key: {:?}, result: {:?}", key, res);
+                ratatui_hypertile::EventOutcome::Consumed
+            }
+        }
     }
     fn render(
         &mut self,
@@ -566,7 +591,7 @@ struct TerminalState {
     terminal: Terminal,
     program: String,
     dirty: bool,
-    ani_active: bool,
+    ani_active: u8,
     images: HashMap<u64, Image>,
 }
 
@@ -577,7 +602,7 @@ impl TerminalState {
             terminal,
             program,
             dirty: true,
-            ani_active: false,
+            ani_active: 0,
             size,
             images: HashMap::new(),
         }
@@ -599,8 +624,9 @@ impl TerminalState {
         for (rows, line) in screen.lines_in_phys_range(start..end).iter().enumerate() {
             let mut spans = Vec::new();
 
+            let mut logical_col = 0usize;
             // 遍历该行中的所有 cell
-            for (cols, cell) in line.visible_cells().enumerate() {
+            for cell in line.visible_cells() {
                 if let Some(images) = cell.attrs().images() {
                     for img_cell in images {
                         let data = &*img_cell.image_data().data();
@@ -610,14 +636,14 @@ impl TerminalState {
                                 // TODO: implement crop logic
                                 match rect_map.get_mut(&hash) {
                                     Some(rect) => {
-                                        rect.x = rect.x.min(cols as u16);
+                                        rect.x = rect.x.min(logical_col as u16);
                                         rect.y = rect.y.min(rows as u16);
                                     }
                                     None => {
                                         rect_map.insert(
                                             hash,
                                             Rect::new(
-                                                cols as u16,
+                                                logical_col as u16,
                                                 rows as u16,
                                                 image.col,
                                                 image.row,
@@ -628,7 +654,6 @@ impl TerminalState {
                             }
                             None => match to_dynamic_image(data) {
                                 Ok(img) => {
-                                    log::info!("{:?}", img_cell);
                                     let width = img.width();
                                     let col = width as f64 / CellInfo::width();
                                     let height = img.height();
@@ -640,11 +665,13 @@ impl TerminalState {
                                         height,
                                         width,
                                         state,
-                                        area: Rect::new(cols as u16, rows as u16, 0, 0),
+                                        area: Rect::new(logical_col as u16, rows as u16, 0, 0),
                                     };
                                     self.images.insert(hash, img);
-                                    rect_map
-                                        .insert(hash, Rect::new(cols as u16, rows as u16, 0, 0));
+                                    rect_map.insert(
+                                        hash,
+                                        Rect::new(logical_col as u16, rows as u16, 0, 0),
+                                    );
                                 }
                                 Err(e) => {
                                     log::error!("{e}");
@@ -656,6 +683,7 @@ impl TerminalState {
                 }
                 let span = self.cell_to_span(&cell.as_cell());
                 spans.push(span);
+                logical_col += cell.width();
             }
 
             // 如果行为空，添加至少一个空 span
@@ -794,14 +822,13 @@ impl Widget for TerminalWidget<'_> {
         if cursor_info.visibility == wezterm_surface::CursorVisibility::Visible {
             Self::draw_cursor(area, buf, cursor_info);
         }
-        if self.state.ani_active {
+        if self.state.ani_active > 0 {
             return;
         }
         for (id, rect) in rect_map.iter() {
             if let Some(image) = self.state.images.get_mut(&id) {
                 // area change, redraw
                 if rect != &image.area || self.state.dirty {
-                    log::info!("area: {:?}", rect);
                     image.area = *rect;
                     let area = image.relative(area);
                     StatefulImage::default().render(area, buf, &mut image.state);

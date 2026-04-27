@@ -286,6 +286,11 @@ impl WorkspaceRuntime {
                 return;
             } else {
                 self.animation.take();
+                for tab in self.tabs.iter_mut() {
+                    tab.runtime
+                        .registry
+                        .broadcast_event(&mut ratatui_hypertile::HypertileEvent::AniStop);
+                }
             }
         }
 

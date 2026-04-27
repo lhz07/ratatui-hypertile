@@ -126,14 +126,14 @@ fn run(
         let timeout = Duration::from_millis(16);
         if event::poll(timeout)? {
             let event = event::read()?;
-            match event {
-                Event::Mouse(_) => (),
-                Event::Key(key) if key.code == KeyCode::Up || key.code == KeyCode::Down => (),
-                _ => match event {
-                    Event::Paste(_) => log::info!("paste event"),
-                    _ => log::info!("{:?}", event),
-                },
-            }
+            // match event {
+            //     Event::Mouse(_) => (),
+            //     Event::Key(key) if key.code == KeyCode::Up || key.code == KeyCode::Down => (),
+            //     _ => match event {
+            //         Event::Paste(_) => log::info!("paste event"),
+            //         _ => log::info!("{:?}", event),
+            //     },
+            // }
             if let Event::Key(key) = event
                 && key.code == KeyCode::Char('c')
                 && key.modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT
