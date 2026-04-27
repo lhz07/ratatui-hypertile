@@ -74,6 +74,7 @@ pub struct MountedPty {
     root: PtyPair,
     child: Box<dyn Child + Send + Sync>,
     area: Rect,
+    animation_active: bool,
     render_tx: mpsc::Sender<RenderMsg>,
 }
 
@@ -116,21 +117,21 @@ impl AsyncWrite for PtyFd {
         buf: &[u8],
     ) -> Poll<io::Result<usize>> {
         loop {
-            log::trace!("wait for writing...");
+            // log::trace!("wait for writing...");
             let mut guard = ready!(self.0.poll_write_ready(cx))?;
-            log::trace!("write once");
+            // log::trace!("write once");
             let n = unsafe { libc::write(*guard.get_inner(), buf.as_ptr() as _, buf.len()) };
-            log::trace!("write call finished");
+            // log::trace!("write call finished");
             if n == -1 {
                 let err = std::io::Error::last_os_error();
                 if err.kind() == io::ErrorKind::WouldBlock {
-                    log::trace!("would block");
+                    // log::trace!("would block");
                     guard.clear_ready();
                 } else {
                     return Poll::Ready(Err(err));
                 }
             } else {
-                log::trace!("write finished");
+                // log::trace!("write finished");
                 return Poll::Ready(Ok(n as usize));
             }
         }
@@ -148,6 +149,9 @@ impl AsyncWrite for PtyFd {
 
 enum RenderMsg {
     RenderScreen(Rect, Buffer, oneshot::Sender<Buffer>, bool),
+    SetDirty,
+    AniStart,
+    AniStop,
     Event(HypertileEvent),
     SetSize(Rect),
 }
@@ -273,7 +277,7 @@ impl MountedPty {
                         biased;
                         // read all first
                         res = pty_fd.read(&mut buf) => {
-                            log::info!("read");
+                            // log::info!("read");
                             let n = res?;
                             if n != 0{
                                 // update
@@ -308,6 +312,7 @@ impl MountedPty {
             child,
             area,
             render_tx,
+            animation_active: false,
         })
     }
 }
@@ -334,6 +339,12 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
         }
         RenderMsg::SetSize(rect) => {
             state.resize(rect.width, rect.height);
+        }
+        RenderMsg::SetDirty => state.dirty = true,
+        RenderMsg::AniStart => state.ani_active = true,
+        RenderMsg::AniStop => {
+            state.ani_active = false;
+            state.dirty = true;
         }
         RenderMsg::Event(event) => {
             if let HypertileEvent::Term(term_event) = event {
@@ -456,9 +467,23 @@ impl HypertilePlugin for PtyPlugin {
         let pty = match &mut self.mounted {
             Some(pty) => {
                 if let Some(target) = target_rect {
+                    if !pty.animation_active {
+                        pty.animation_active = true;
+                        log::info!("animation: true");
+                        if pty.render_tx.try_send(RenderMsg::AniStart).is_err() {
+                            log::error!("can not set animation start");
+                        }
+                    }
                     pty.resize(block.inner(target));
                 } else {
                     pty.resize(term_area);
+                    if pty.animation_active {
+                        pty.animation_active = false;
+                        log::info!("animation false");
+                        if pty.render_tx.try_send(RenderMsg::AniStop).is_err() {
+                            log::error!("can not set animation stop");
+                        }
+                    }
                 }
                 pty
             }
@@ -523,15 +548,15 @@ struct Image {
     width: u32,
     height: u32,
     state: StatefulProtocol,
-    area: Option<Rect>,
+    area: Rect,
 }
 
 impl Image {
-    fn relative(&self, reference: Rect) -> Option<Rect> {
-        let mut rect = self.area?;
+    fn relative(&self, reference: Rect) -> Rect {
+        let mut rect = self.area;
         rect.x += reference.x;
         rect.y += reference.y;
-        Some(rect)
+        rect
     }
 }
 
@@ -540,6 +565,8 @@ struct TerminalState {
     size: TerminalSize,
     terminal: Terminal,
     program: String,
+    dirty: bool,
+    ani_active: bool,
     images: HashMap<u64, Image>,
 }
 
@@ -549,21 +576,25 @@ impl TerminalState {
             view_row: 0,
             terminal,
             program,
+            dirty: true,
+            ani_active: false,
             size,
             images: HashMap::new(),
         }
     }
     pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.dirty = true;
         self.size.resize(cols, rows);
         self.terminal.resize(self.size);
     }
     /// 将终端屏幕转换为 Ratatui 的 Line
-    pub fn render_screen(&mut self) -> Vec<Line<'static>> {
+    pub fn render_screen(&mut self) -> (Vec<Line<'static>>, HashMap<u64, Rect>) {
         let screen = self.terminal.screen();
         let mut lines = Vec::new();
         let phys_row = screen.phys_row(0);
         let start = phys_row.saturating_sub(self.view_row.abs() as usize);
         let end = start + self.terminal.get_size().rows;
+        let mut rect_map: HashMap<u64, Rect> = HashMap::new();
         // 遍历所有可见行
         for (rows, line) in screen.lines_in_phys_range(start..end).iter().enumerate() {
             let mut spans = Vec::new();
@@ -572,27 +603,32 @@ impl TerminalState {
             for (cols, cell) in line.visible_cells().enumerate() {
                 if let Some(images) = cell.attrs().images() {
                     for img_cell in images {
-                        let cols = cols + 2;
                         let data = &*img_cell.image_data().data();
-                        let hash = img_cell.simple_hash();
+                        let hash = img_cell.unique_hash();
                         match self.images.get_mut(&hash) {
                             Some(image) => {
                                 // TODO: implement crop logic
-                                if let Some(rect) = &mut image.area {
-                                    rect.x = rect.x.min(cols as u16);
-                                    rect.y = rect.y.min(rows as u16);
-                                } else {
-                                    image.area = Some(Rect {
-                                        x: cols as u16,
-                                        y: rows as u16,
-                                        width: image.col,
-                                        height: image.row,
-                                    })
+                                match rect_map.get_mut(&hash) {
+                                    Some(rect) => {
+                                        rect.x = rect.x.min(cols as u16);
+                                        rect.y = rect.y.min(rows as u16);
+                                    }
+                                    None => {
+                                        rect_map.insert(
+                                            hash,
+                                            Rect::new(
+                                                cols as u16,
+                                                rows as u16,
+                                                image.col,
+                                                image.row,
+                                            ),
+                                        );
+                                    }
                                 }
                             }
                             None => match to_dynamic_image(data) {
                                 Ok(img) => {
-                                    // log::info!("new image: {:#?}", img_cell);
+                                    log::info!("{:?}", img_cell);
                                     let width = img.width();
                                     let col = width as f64 / CellInfo::width();
                                     let height = img.height();
@@ -604,14 +640,11 @@ impl TerminalState {
                                         height,
                                         width,
                                         state,
-                                        area: Some(Rect::new(
-                                            cols as u16,
-                                            rows as u16,
-                                            col.round() as u16,
-                                            row.round() as u16,
-                                        )),
+                                        area: Rect::new(cols as u16, rows as u16, 0, 0),
                                     };
                                     self.images.insert(hash, img);
+                                    rect_map
+                                        .insert(hash, Rect::new(cols as u16, rows as u16, 0, 0));
                                 }
                                 Err(e) => {
                                     log::error!("{e}");
@@ -633,7 +666,7 @@ impl TerminalState {
             lines.push(Line::from(spans));
         }
 
-        lines
+        (lines, rect_map)
     }
 
     /// 将单个 cell 转换为 Ratatui 的 Span
@@ -752,8 +785,7 @@ impl Widget for TerminalWidget<'_> {
             return;
         }
 
-        let lines = self.state.render_screen();
-
+        let (lines, rect_map) = self.state.render_screen();
         let paragraph = Paragraph::new(lines).scroll((0, 0));
 
         paragraph.render(area, buf);
@@ -762,17 +794,38 @@ impl Widget for TerminalWidget<'_> {
         if cursor_info.visibility == wezterm_surface::CursorVisibility::Visible {
             Self::draw_cursor(area, buf, cursor_info);
         }
-
-        for image in self.state.images.values_mut() {
-            if let Some(area) = image.relative(area) {
-                // log::info!("area: {:?}", area);
-                StatefulImage::default().render(area, buf, &mut image.state);
-                image.area.take();
-            } else {
-                // log::info!("empty area: {:?}", area);
+        if self.state.ani_active {
+            return;
+        }
+        for (id, rect) in rect_map.iter() {
+            if let Some(image) = self.state.images.get_mut(&id) {
+                // area change, redraw
+                if rect != &image.area || self.state.dirty {
+                    log::info!("area: {:?}", rect);
+                    image.area = *rect;
+                    let area = image.relative(area);
+                    StatefulImage::default().render(area, buf, &mut image.state);
+                } else {
+                    // skip the cell
+                    let area = image.relative(area);
+                    for row in area.top()..area.bottom() {
+                        for col in area.left()..area.right() {
+                            if let Some(cell) = buf.cell_mut((col, row)) {
+                                cell.set_skip(true);
+                            }
+                        }
+                    }
+                }
             }
         }
-        // log::info!("================");
+        for (id, image) in &mut self.state.images {
+            // if the image is not shown on screen, clear its last area
+            if !rect_map.contains_key(id) {
+                image.area = Rect::default();
+            }
+        }
+
+        self.state.dirty = false;
     }
 }
 
