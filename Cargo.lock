@@ -1965,6 +1965,7 @@ name = "ratatui-hypertile-extras"
 version = "0.3.0"
 dependencies = [
  "anyhow",
+ "base64-simd",
  "crossterm",
  "image",
  "libc",

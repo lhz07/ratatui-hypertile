@@ -23,7 +23,7 @@ use std::{
     borrow::Cow,
     collections::HashMap,
     env,
-    io::{self},
+    io::{self, Cursor},
     mem,
     pin::Pin,
     sync::{Arc, LazyLock},
@@ -572,17 +572,17 @@ struct Image {
     col: u16,
     width: u32,
     height: u32,
-    state: StatefulProtocol,
-    area: Rect,
+    img: DynamicImage,
+    area: Vec<(u16, u16)>,
 }
 
 impl Image {
-    fn relative(&self, reference: Rect) -> Rect {
-        let mut rect = self.area;
-        rect.x += reference.x;
-        rect.y += reference.y;
-        rect
-    }
+    // fn relative(&self, reference: Rect) -> Rect {
+    //     let mut rect = self.area;
+    //     rect.x += reference.x;
+    //     rect.y += reference.y;
+    //     rect
+    // }
 }
 
 struct TerminalState {
@@ -613,13 +613,13 @@ impl TerminalState {
         self.terminal.resize(self.size);
     }
     /// 将终端屏幕转换为 Ratatui 的 Line
-    pub fn render_screen(&mut self) -> (Vec<Line<'static>>, HashMap<u64, Rect>) {
+    pub fn render_screen(&mut self) -> (Vec<Line<'static>>, HashMap<u64, Vec<(u16, u16)>>) {
         let screen = self.terminal.screen();
         let mut lines = Vec::new();
         let phys_row = screen.phys_row(0);
         let start = phys_row.saturating_sub(self.view_row.abs() as usize);
         let end = start + self.terminal.get_size().rows;
-        let mut rect_map: HashMap<u64, Rect> = HashMap::new();
+        let mut pos_map: HashMap<u64, Vec<(u16, u16)>> = HashMap::new();
         // 遍历所有可见行
         for (rows, line) in screen.lines_in_phys_range(start..end).iter().enumerate() {
             let mut spans = Vec::new();
@@ -632,23 +632,15 @@ impl TerminalState {
                         let data = &*img_cell.image_data().data();
                         let hash = img_cell.unique_hash();
                         match self.images.get_mut(&hash) {
-                            Some(image) => {
+                            Some(_) => {
                                 // TODO: implement crop logic
-                                match rect_map.get_mut(&hash) {
-                                    Some(rect) => {
-                                        rect.x = rect.x.min(logical_col as u16);
-                                        rect.y = rect.y.min(rows as u16);
+                                match pos_map.get_mut(&hash) {
+                                    Some(positions) => {
+                                        positions.push((logical_col as u16, rows as u16));
                                     }
                                     None => {
-                                        rect_map.insert(
-                                            hash,
-                                            Rect::new(
-                                                logical_col as u16,
-                                                rows as u16,
-                                                image.col,
-                                                image.row,
-                                            ),
-                                        );
+                                        pos_map
+                                            .insert(hash, vec![(logical_col as u16, rows as u16)]);
                                     }
                                 }
                             }
@@ -658,20 +650,16 @@ impl TerminalState {
                                     let col = width as f64 / CellInfo::width();
                                     let height = img.height();
                                     let row = height as f64 / CellInfo::height();
-                                    let state = PICKER.new_resize_protocol(img);
                                     let img = Image {
                                         row: row.round() as u16,
                                         col: col.round() as u16,
                                         height,
                                         width,
-                                        state,
-                                        area: Rect::new(logical_col as u16, rows as u16, 0, 0),
+                                        img,
+                                        area: Vec::new(),
                                     };
                                     self.images.insert(hash, img);
-                                    rect_map.insert(
-                                        hash,
-                                        Rect::new(logical_col as u16, rows as u16, 0, 0),
-                                    );
+                                    pos_map.insert(hash, vec![(logical_col as u16, rows as u16)]);
                                 }
                                 Err(e) => {
                                     log::error!("{e}");
@@ -679,10 +667,10 @@ impl TerminalState {
                             },
                         }
                     }
-                    continue;
+                } else {
+                    let span = self.cell_to_span(&cell.as_cell());
+                    spans.push(span);
                 }
-                let span = self.cell_to_span(&cell.as_cell());
-                spans.push(span);
                 logical_col += cell.width();
             }
 
@@ -693,8 +681,7 @@ impl TerminalState {
 
             lines.push(Line::from(spans));
         }
-
-        (lines, rect_map)
+        (lines, pos_map)
     }
 
     /// 将单个 cell 转换为 Ratatui 的 Span
@@ -813,7 +800,7 @@ impl Widget for TerminalWidget<'_> {
             return;
         }
 
-        let (lines, rect_map) = self.state.render_screen();
+        let (lines, pos_map) = self.state.render_screen();
         let paragraph = Paragraph::new(lines).scroll((0, 0));
 
         paragraph.render(area, buf);
@@ -825,35 +812,80 @@ impl Widget for TerminalWidget<'_> {
         if self.state.ani_active > 0 {
             return;
         }
-        for (id, rect) in rect_map.iter() {
-            if let Some(image) = self.state.images.get_mut(&id) {
-                // area change, redraw
-                if rect != &image.area || self.state.dirty {
-                    image.area = *rect;
-                    let area = image.relative(area);
-                    StatefulImage::default().render(area, buf, &mut image.state);
-                } else {
-                    // skip the cell
-                    let area = image.relative(area);
-                    for row in area.top()..area.bottom() {
-                        for col in area.left()..area.right() {
-                            if let Some(cell) = buf.cell_mut((col, row)) {
-                                cell.set_skip(true);
-                            }
-                        }
-                    }
-                }
-            }
-        }
         for (id, image) in &mut self.state.images {
             // if the image is not shown on screen, clear its last area
-            if !rect_map.contains_key(id) {
-                image.area = Rect::default();
+            if !pos_map.contains_key(id) {
+                image.area.clear();
+            }
+        }
+        for (id, positions) in pos_map {
+            if let Some(image) = self.state.images.get_mut(&id) {
+                // area change, redraw
+                let mut pos = positions
+                    .iter()
+                    .copied()
+                    .map(|(x, y)| (x + area.x, y + area.y));
+                let first = pos.next().expect("positions is never empty");
+                // skip other cells
+                for (x, y) in pos {
+                    if let Some(cell) = buf.cell_mut((x, y)) {
+                        cell.set_skip(true);
+                    } else {
+                        log::error!("image cell position is wrong!");
+                    }
+                }
+                if positions != image.area || self.state.dirty {
+                    log::info!("{:?}", positions);
+                    if let Some(cell) = buf.cell_mut(first) {
+                        let symbol = encode(&image.img, image.col, image.row);
+                        log::info!("set {:?} symbol", first);
+                        cell.set_symbol(&symbol);
+                    } else {
+                        log::error!("image cell position is wrong!");
+                    }
+                    image.area = positions;
+                } else {
+                    if let Some(cell) = buf.cell_mut(first) {
+                        cell.set_skip(true);
+                    } else {
+                        log::error!("image cell position is wrong!");
+                    }
+                }
             }
         }
 
         self.state.dirty = false;
     }
+}
+
+fn encode(img: &DynamicImage, width: u16, height: u16) -> String {
+    use std::fmt::Write;
+    let mut png: Vec<u8> = vec![];
+    if let Err(e) = img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png) {
+        log::error!("image write error: {e}");
+    }
+
+    let escape = "\x1b";
+
+    let mut seq = String::new();
+    for _ in 0..height {
+        write!(seq, "{escape}[{width}X{escape}[1B").unwrap();
+    }
+    write!(seq, "{escape}[{height}A").unwrap();
+
+    write!(
+        seq,
+        "{escape}]1337;File=inline=1;size={};width={}px;height={}px;doNotMoveCursor=1:",
+        png.len(),
+        img.width(),
+        img.height(),
+    )
+    .unwrap();
+
+    base64_simd::STANDARD.encode_append(&png, &mut seq);
+
+    write!(seq, "\x07").unwrap();
+    seq
 }
 
 pub static PICKER: LazyLock<Picker> = LazyLock::new(|| {

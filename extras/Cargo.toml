@@ -28,6 +28,7 @@ wezterm-surface = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch
 termwiz = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 ratatui-image = "10.0.6"
 image = "0.25.10"
+base64-simd = "0.8.0"
 
 
 [features]
