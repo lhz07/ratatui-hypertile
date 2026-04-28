@@ -1967,6 +1967,7 @@ dependencies = [
  "anyhow",
  "base64-simd",
  "crossterm",
+ "icy_sixel",
  "image",
  "libc",
  "log",

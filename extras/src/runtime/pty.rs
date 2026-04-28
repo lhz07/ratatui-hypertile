@@ -3,7 +3,7 @@ use crossterm::event::{
     self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
     KeyEventKind, KeyModifiers as CrosstermModifiers,
 };
-use image::{DynamicImage, RgbaImage};
+use image::{DynamicImage, EncodableLayout, RgbaImage};
 use portable_pty::{Child, CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
 use ratatui::{
     buffer::Buffer,
@@ -11,14 +11,11 @@ use ratatui::{
     style::{Color, Modifier, Style},
     symbols::border,
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph, StatefulWidget, Widget},
+    widgets::{Block, Borders, Paragraph, Widget},
 };
 use ratatui_hypertile::{CellInfo, EventOutcome, HypertileEvent};
-use ratatui_image::{
-    StatefulImage,
-    picker::{Picker, ProtocolType},
-    protocol::StatefulProtocol,
-};
+use ratatui_image::picker::{Picker, ProtocolType};
+use std::fmt::Write;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -809,7 +806,7 @@ impl Widget for TerminalWidget<'_> {
         if cursor_info.visibility == wezterm_surface::CursorVisibility::Visible {
             Self::draw_cursor(area, buf, cursor_info);
         }
-        if self.state.ani_active > 0 {
+        if self.state.ani_active > 0 || matches!(PICKER.protocol_type(), ProtocolType::Halfblocks) {
             return;
         }
         for (id, image) in &mut self.state.images {
@@ -837,9 +834,17 @@ impl Widget for TerminalWidget<'_> {
                 if positions != image.area || self.state.dirty {
                     log::info!("{:?}", positions);
                     if let Some(cell) = buf.cell_mut(first) {
-                        let symbol = encode(&image.img, image.col, image.row);
-                        log::info!("set {:?} symbol", first);
-                        cell.set_symbol(&symbol);
+                        match PICKER.protocol_type() {
+                            ProtocolType::Iterm2 => {
+                                let symbol = encode_iterm2(&image.img, image.col, image.row);
+                                cell.set_symbol(&symbol);
+                            }
+                            ProtocolType::Sixel => {
+                                let symbol = encode_sixel(&image.img, image.col, image.row);
+                                cell.set_symbol(&symbol);
+                            }
+                            _ => (),
+                        }
                     } else {
                         log::error!("image cell position is wrong!");
                     }
@@ -858,8 +863,7 @@ impl Widget for TerminalWidget<'_> {
     }
 }
 
-fn encode(img: &DynamicImage, width: u16, height: u16) -> String {
-    use std::fmt::Write;
+fn encode_iterm2(img: &DynamicImage, width: u16, height: u16) -> String {
     let mut png: Vec<u8> = vec![];
     if let Err(e) = img.write_to(&mut Cursor::new(&mut png), image::ImageFormat::Png) {
         log::error!("image write error: {e}");
@@ -886,6 +890,35 @@ fn encode(img: &DynamicImage, width: u16, height: u16) -> String {
 
     write!(seq, "\x07").unwrap();
     seq
+}
+
+fn encode_sixel(img: &DynamicImage, width: u16, height: u16) -> String {
+    use icy_sixel::{EncodeOptions, sixel_encode};
+
+    let (w, h) = (img.width(), img.height());
+    let bytes = match img {
+        DynamicImage::ImageRgba8(img) => Cow::Borrowed(img.as_bytes()),
+        _ => img.to_rgb8().into_vec().into(),
+    };
+    let escape = "\x1b";
+
+    let sixel_data = match sixel_encode(&bytes, w as usize, h as usize, &EncodeOptions::default()) {
+        Ok(s) => s,
+        Err(e) => {
+            log::error!("sixel img encode error: {e}");
+            return String::new();
+        }
+    };
+
+    let mut data = String::new();
+
+    for _ in 0..height {
+        write!(data, "{escape}[{width}X{escape}[1B").unwrap();
+    }
+    write!(data, "{escape}[{height}A").unwrap();
+    data.push_str(&sixel_data);
+
+    data
 }
 
 pub static PICKER: LazyLock<Picker> = LazyLock::new(|| {
