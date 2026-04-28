@@ -549,7 +549,7 @@ impl HypertilePlugin for PtyPlugin {
 #[derive(Debug, Clone, Copy)]
 pub struct CursorInfo {
     pub x: usize,
-    pub y: usize,
+    pub y: i64,
     pub shape: wezterm_surface::CursorShape,
     pub visibility: wezterm_surface::CursorVisibility,
 }
@@ -571,15 +571,6 @@ struct Image {
     height: u32,
     img: DynamicImage,
     area: Vec<(u16, u16)>,
-}
-
-impl Image {
-    // fn relative(&self, reference: Rect) -> Rect {
-    //     let mut rect = self.area;
-    //     rect.x += reference.x;
-    //     rect.y += reference.y;
-    //     rect
-    // }
 }
 
 struct TerminalState {
@@ -765,7 +756,7 @@ impl TerminalState {
 
         CursorInfo {
             x: cursor.x,
-            y: cursor.y as usize,
+            y: cursor.y - self.view_row,
             shape: cursor.shape,
             visibility: cursor.visibility,
         }
@@ -956,16 +947,26 @@ impl TerminalWidget<'_> {
         if let Some(cell) = &mut buf.cell_mut((cursor_x, cursor_y)) {
             match cursor.shape {
                 wezterm_surface::CursorShape::Default
-                | wezterm_surface::CursorShape::SteadyBlock
-                | wezterm_surface::CursorShape::BlinkingBlock => {
-                    cell.modifier ^= Modifier::REVERSED;
+                | wezterm_surface::CursorShape::SteadyBlock => {
+                    cell.bg = Color::Reset;
+                    cell.fg = Color::Reset;
+                    cell.modifier |= Modifier::REVERSED;
                 }
-                wezterm_surface::CursorShape::BlinkingBar
-                | wezterm_surface::CursorShape::SteadyBar => {
+                wezterm_surface::CursorShape::BlinkingBlock => {
+                    cell.bg = Color::Reset;
+                    cell.fg = Color::Reset;
+                    cell.modifier |= Modifier::REVERSED | Modifier::SLOW_BLINK;
+                }
+                wezterm_surface::CursorShape::BlinkingBar => {
+                    cell.modifier |= Modifier::UNDERLINED | Modifier::SLOW_BLINK;
+                }
+                wezterm_surface::CursorShape::SteadyBar => {
                     cell.modifier |= Modifier::UNDERLINED;
                 }
-                wezterm_surface::CursorShape::BlinkingUnderline
-                | wezterm_surface::CursorShape::SteadyUnderline => {
+                wezterm_surface::CursorShape::BlinkingUnderline => {
+                    cell.modifier |= Modifier::UNDERLINED | Modifier::SLOW_BLINK;
+                }
+                wezterm_surface::CursorShape::SteadyUnderline => {
                     cell.modifier |= Modifier::UNDERLINED;
                 }
             }
