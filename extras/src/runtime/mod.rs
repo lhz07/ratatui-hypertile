@@ -338,16 +338,26 @@ impl HypertileRuntime {
                     | MouseEventKind::ScrollUp
                     | MouseEventKind::Down(_) => Ok(self.forward_to_plugin(event)),
                     MouseEventKind::Moved => {
-                        let pos = Position::new(mouse.column, mouse.row);
-                        let panes = self.core.state().panes();
                         let mut focus_id = None;
-                        for (id, area) in panes {
-                            if area.contains(pos) {
-                                focus_id = Some(id);
-                                break;
+                        match self.core.state().full_pane() {
+                            Some(full_pane) => {
+                                focus_id = Some(full_pane);
+                            }
+                            None => {
+                                let pos = Position::new(mouse.column, mouse.row);
+                                let panes = self.core.state().panes();
+                                for (id, area) in panes {
+                                    if area.contains(pos) {
+                                        focus_id = Some(id);
+                                        break;
+                                    }
+                                }
                             }
                         }
-                        if let Some(id) = focus_id {
+                        if let Some(id) = focus_id
+                            && let Some(focus) = self.core.focused_pane()
+                            && id != focus
+                        {
                             self.focus_pane(id)?;
                         }
 
