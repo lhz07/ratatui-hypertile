@@ -1,4 +1,7 @@
-use crate::{HypertilePlugin, runtime::tokio_spawn};
+use crate::{
+    HypertilePlugin,
+    runtime::{termwiz::IntoRatatui, tokio_spawn},
+};
 use crossterm::event::{
     self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
     KeyEventKind, KeyModifiers as CrosstermModifiers,
@@ -26,7 +29,7 @@ use std::{
     sync::{Arc, LazyLock},
     task::{Poll, ready},
 };
-use termwiz::{color::ColorAttribute, image::ImageDataType};
+use termwiz::image::ImageDataType;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, unix::AsyncFd},
     sync::{
@@ -34,8 +37,7 @@ use tokio::{
         oneshot,
     },
 };
-use wezterm_cell::{Cell, Intensity};
-use wezterm_term::{KeyCode, KeyModifiers, Terminal, TerminalConfiguration, TerminalSize};
+use wezterm_term::{CellRef, KeyCode, KeyModifiers, Terminal, TerminalConfiguration, TerminalSize};
 
 #[derive(Default)]
 pub struct PtyPlugin {
@@ -656,7 +658,7 @@ impl TerminalState {
                         }
                     }
                 } else {
-                    let span = self.cell_to_span(&cell.as_cell());
+                    let span = self.cell_to_span(cell);
                     spans.push(span);
                 }
                 logical_col += cell.width();
@@ -673,80 +675,11 @@ impl TerminalState {
     }
 
     /// 将单个 cell 转换为 Ratatui 的 Span
-    fn cell_to_span(&self, cell: &Cell) -> Span<'static> {
+    fn cell_to_span(&self, cell: CellRef<'_>) -> Span<'static> {
         let text = cell.str().to_string();
-        let attrs = cell.attrs();
-
-        // 解析前景色
-        let fg = self.parse_color(attrs.foreground());
-
-        // 解析背景色
-        let bg = self.parse_color(attrs.background());
-
-        // 构建修饰符
-        let mut modifier = Modifier::empty();
-        match attrs.intensity() {
-            Intensity::Bold => modifier |= Modifier::BOLD,
-            Intensity::Half => modifier |= Modifier::DIM,
-            Intensity::Normal => (),
-        }
-
-        if attrs.italic() {
-            modifier |= Modifier::ITALIC;
-        }
-        if attrs.underline() != wezterm_cell::Underline::None {
-            modifier |= Modifier::UNDERLINED;
-        }
-        if attrs.reverse() {
-            modifier |= Modifier::REVERSED;
-        }
-        if attrs.strikethrough() {
-            modifier |= Modifier::CROSSED_OUT;
-        }
-
-        let style = Style::new().fg(fg).bg(bg).add_modifier(modifier);
+        let style: Style = cell.attrs().into_ratatui();
 
         Span::styled(text, style)
-    }
-
-    /// 将 WezTerm 的颜色转换为 Ratatui 的颜色
-    fn parse_color(&self, color_attr: ColorAttribute) -> Color {
-        match color_attr {
-            ColorAttribute::Default => Color::Reset,
-
-            ColorAttribute::PaletteIndex(idx) => self.palette_index_to_color(idx),
-
-            ColorAttribute::TrueColorWithPaletteFallback(rgb, _)
-            | ColorAttribute::TrueColorWithDefaultFallback(rgb) => {
-                let (r, g, b, _) = rgb.as_rgba_u8();
-                Color::Rgb(r, g, b)
-            }
-        }
-    }
-
-    /// 将 ANSI 调色板索引转换为 Ratatui 颜色
-    fn palette_index_to_color(&self, idx: u8) -> Color {
-        match idx {
-            // 标准 ANSI 16 色
-            0 => Color::Black,
-            1 => Color::Red,
-            2 => Color::Green,
-            3 => Color::Yellow,
-            4 => Color::Blue,
-            5 => Color::Magenta,
-            6 => Color::Cyan,
-            7 => Color::Gray,
-            8 => Color::DarkGray,
-            9 => Color::LightRed,
-            10 => Color::LightGreen,
-            11 => Color::LightYellow,
-            12 => Color::LightBlue,
-            13 => Color::LightMagenta,
-            14 => Color::LightCyan,
-            15 => Color::White,
-            // 256 色调色板（索引 16-255）
-            idx => Color::Indexed(idx),
-        }
     }
 
     /// 获取光标位置和形状

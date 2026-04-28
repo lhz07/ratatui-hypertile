@@ -9,6 +9,7 @@ mod palette;
 pub mod pty;
 mod render;
 mod tab_bar;
+pub mod termwiz;
 mod types;
 mod widget;
 pub(crate) mod workspace;
