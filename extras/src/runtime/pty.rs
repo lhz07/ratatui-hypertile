@@ -7,7 +7,9 @@ use crossterm::event::{
     KeyEventKind, KeyModifiers as CrosstermModifiers,
 };
 use image::{DynamicImage, EncodableLayout, RgbaImage};
-use portable_pty::{Child, CommandBuilder, NativePtySystem, PtyPair, PtySize, PtySystem};
+use portable_pty::{
+    CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem, SlavePty, unix::UnixMasterPty,
+};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -18,7 +20,6 @@ use ratatui::{
 };
 use ratatui_hypertile::{CellInfo, EventOutcome, HypertileEvent};
 use ratatui_image::picker::{Picker, ProtocolType};
-use std::fmt::Write;
 use std::{
     borrow::Cow,
     collections::HashMap,
@@ -29,6 +30,7 @@ use std::{
     sync::{Arc, LazyLock},
     task::{Poll, ready},
 };
+use std::{fmt::Write, process::Child};
 use termwiz::image::ImageDataType;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, unix::AsyncFd},
@@ -70,8 +72,8 @@ impl PtyPlugin {
 }
 
 pub struct MountedPty {
-    root: PtyPair,
-    child: Box<dyn Child + Send + Sync>,
+    master: UnixMasterPty,
+    child: Child,
     area: Rect,
     animation_active: bool,
     space_ani_active: bool,
@@ -206,7 +208,6 @@ impl MountedPty {
             let rows = area.height;
             let cols = area.width;
             if self
-                .root
                 .master
                 .resize(PtySize {
                     rows,
@@ -229,13 +230,13 @@ impl MountedPty {
         let rows = area.height.max(MIN_ROW);
         let cols = area.width.max(MIN_COL);
         let pty = NativePtySystem::default();
-        let root = pty.openpty(PtySize {
+        let (master, slave) = pty.openpty(PtySize {
             rows,
             cols,
             ..Default::default()
         })?;
-        let child = root.slave.spawn_command(CommandBuilder::new(program))?;
-        let fd = root.master.as_raw_fd().expect("valid on macOS");
+        let child = slave.spawn_command(CommandBuilder::new(program))?;
+        let fd = master.as_raw_fd().expect("valid on macOS");
         unsafe {
             // set nonblocking
             let res = libc::ioctl(fd, libc::FIONBIO, &mut (true as libc::c_int));
@@ -308,7 +309,7 @@ impl MountedPty {
         });
 
         Ok(Self {
-            root,
+            master,
             child,
             area,
             render_tx,
@@ -984,9 +985,9 @@ fn pane_block<'a>(title: impl Into<Line<'a>>, is_focused: bool, color: Color) ->
 #[allow(unused_variables)]
 async fn test_fd() -> anyhow::Result<()> {
     let pty = NativePtySystem::default();
-    let root = pty.openpty(PtySize::default())?;
-    let child = root.slave.spawn_command(CommandBuilder::new("fish"))?;
-    let fd = root.master.as_raw_fd().expect("valid on macOS");
+    let (master, slave) = pty.openpty(PtySize::default())?;
+    let child = slave.spawn_command(CommandBuilder::new("fish"))?;
+    let fd = master.as_raw_fd().expect("valid on macOS");
     unsafe {
         // set nonblocking
         let res = libc::ioctl(fd, libc::FIONBIO, &mut (true as libc::c_int));

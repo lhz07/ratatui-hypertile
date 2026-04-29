@@ -31,3 +31,4 @@ wezterm-term = { path = "../wezterm_hyprtui/term" }
 wezterm-cell = { path = "../wezterm_hyprtui/wezterm-cell" }
 wezterm-surface = { path = "../wezterm_hyprtui/wezterm-surface" }
 termwiz = { path = "../wezterm_hyprtui/termwiz" }
+portable-pty = { path = "../wezterm_hyprtui/pty" }
