@@ -22,6 +22,3 @@ pub use runtime::{
     InputMode, ModeIndicator, MoveBindings, RuntimeError, SplitBehavior, TabBar, TabBarItem,
     WorkspaceAction, WorkspaceRuntime, pty,
 };
-
-#[cfg(feature = "crossterm")]
-pub use runtime::event_from_crossterm;

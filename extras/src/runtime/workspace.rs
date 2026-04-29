@@ -1,4 +1,4 @@
-use crossterm::event::{Event, KeyCode, KeyModifiers};
+use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui_hypertile::{EventOutcome, HypertileEvent};
 use std::{

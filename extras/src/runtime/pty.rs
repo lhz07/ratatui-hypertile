@@ -2,13 +2,13 @@ use crate::{
     HypertilePlugin,
     runtime::{termwiz::IntoRatatui, tokio_spawn},
 };
-use crossterm::event::{
-    self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
-    KeyEventKind, KeyModifiers as CrosstermModifiers,
-};
 use image::{DynamicImage, EncodableLayout, RgbaImage};
 use portable_pty::{
     CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem, SlavePty, unix::UnixMasterPty,
+};
+use ratatui::crossterm::event::{
+    self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
+    KeyEventKind, KeyModifiers as CrosstermModifiers,
 };
 use ratatui::{
     buffer::Buffer,

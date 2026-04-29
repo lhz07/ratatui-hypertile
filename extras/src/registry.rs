@@ -24,16 +24,6 @@ pub trait HypertilePlugin {
     fn is_closed(&mut self) -> bool {
         false
     }
-
-    #[cfg(feature = "serde")]
-    fn save_state(&self) -> Option<serde_json::Value> {
-        None
-    }
-
-    #[cfg(feature = "serde")]
-    fn load_state(&mut self, _state: &serde_json::Value) -> Result<(), String> {
-        Ok(())
-    }
 }
 
 pub struct PluginInstance {

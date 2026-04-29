@@ -1,4 +1,5 @@
-use crossterm::{
+use ratatui::crossterm::{
+    self,
     event::{
         self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
         Event, KeyCode, KeyModifiers, MouseEventKind,
@@ -16,7 +17,7 @@ use ratatui::{
 use ratatui_hypertile::{EventOutcome, HypertileEvent, PaneId};
 use ratatui_hypertile_extras::{
     AnimationConfig, HypertilePlugin, HypertileRuntime, ModeIndicator, SplitBehavior,
-    WorkspaceRuntime, event_from_crossterm,
+    WorkspaceRuntime,
     pty::{PICKER, PtyPlugin},
 };
 use std::{
@@ -140,7 +141,7 @@ fn run(
             {
                 return Ok(());
             }
-            workspace.handle_event(event_from_crossterm(event));
+            workspace.handle_event(HypertileEvent::Term(event));
         }
 
         if last_tick.elapsed() >= tick_rate {

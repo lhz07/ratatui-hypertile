@@ -1924,9 +1924,7 @@ dependencies = [
 name = "ratatui-hypertile"
 version = "0.3.0"
 dependencies = [
- "crossterm",
  "ratatui",
- "serde",
 ]
 
 [[package]]
@@ -1935,7 +1933,6 @@ version = "0.3.0"
 dependencies = [
  "anyhow",
  "base64-simd",
- "crossterm",
  "icy_sixel",
  "image",
  "libc",
@@ -1944,8 +1941,6 @@ dependencies = [
  "ratatui",
  "ratatui-hypertile",
  "ratatui-image",
- "serde",
- "serde_json",
  "termwiz",
  "tokio",
  "tui-logger",

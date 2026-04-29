@@ -1,6 +1,4 @@
 mod helpers;
-#[cfg(feature = "serde")]
-mod serde_impl;
 mod state;
 mod types;
 

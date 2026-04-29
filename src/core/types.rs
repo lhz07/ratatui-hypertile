@@ -9,7 +9,6 @@ use ratatui::layout::Direction;
 /// assert_eq!(PaneId::new(42).get(), 42);
 /// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub struct PaneId(u64);
 
 impl PaneId {

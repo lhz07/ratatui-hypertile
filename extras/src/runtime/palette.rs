@@ -3,7 +3,7 @@ use crate::runtime::constants::{
     DEFAULT_PLUGIN_TYPE,
 };
 use crate::runtime::{HypertileRuntime, RuntimeError};
-use crossterm::event::{Event, KeyCode, KeyEvent};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent};
 use ratatui_hypertile::{EventOutcome, HypertileEvent, PaneId};
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -269,7 +269,7 @@ mod tests {
         HypertilePlugin,
         runtime::{HypertileRuntime, InputMode, SplitBehavior},
     };
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use ratatui::crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use ratatui::{buffer::Buffer, layout::Rect};
 
     struct Dummy;

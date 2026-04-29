@@ -1,8 +1,6 @@
 mod animation;
 mod builder;
 mod constants;
-#[cfg(feature = "crossterm")]
-mod crossterm;
 mod default_plugin;
 mod keymap;
 mod palette;
@@ -15,7 +13,7 @@ mod widget;
 pub(crate) mod workspace;
 
 use crate::registry::{HypertilePlugin, Registry};
-use ::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
+use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use ratatui::layout::{Direction, Position, Rect};
 use ratatui_hypertile::{
     EventOutcome, Hypertile as CoreHypertile, HypertileAction, HypertileEvent, PaneId,
@@ -27,8 +25,6 @@ use std::time::{Duration, Instant};
 use tokio::task::JoinHandle;
 
 pub use builder::HypertileRuntimeBuilder;
-#[cfg(feature = "crossterm")]
-pub use crossterm::event_from_crossterm;
 pub use keymap::MoveBindings;
 pub use tab_bar::{TabBar, TabBarItem};
 pub use types::{AnimationConfig, BorderConfig, InputMode, RuntimeError, SplitBehavior};
