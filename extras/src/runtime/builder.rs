@@ -8,7 +8,7 @@ use crate::runtime::palette::PaletteState;
 use crate::runtime::{
     AnimationConfig, BorderConfig, HypertileRuntime, InputMode, MoveBindings, SplitBehavior,
 };
-use ratatui_hypertile::{HypertileBuilder as CoreBuilder, MoveScope, PaneId, SplitPolicy};
+use ratatui_hypertile::{HypertileBuilder as CoreBuilder, MoveScope, SplitPolicy};
 
 /// Builder for [`HypertileRuntime`](super::HypertileRuntime).
 ///
@@ -138,7 +138,8 @@ impl HypertileRuntimeBuilder {
         self
     }
 
-    /// Builds a runtime with one root pane and the built-in placeholder plugin.
+    /// Builds a runtime with no root pane initially.
+    /// Use [`set_root`](super::HypertileRuntime::set_root) to set up the tree.
     pub fn build(self) -> HypertileRuntime {
         let core = self.core_builder.build();
 
@@ -146,7 +147,6 @@ impl HypertileRuntimeBuilder {
         registry.register_plugin_type(DEFAULT_PLUGIN_TYPE, || {
             DefaultBlockPlugin::new(DEFAULT_PLUGIN_TITLE)
         });
-        let _ = registry.spawn_plugin(DEFAULT_PLUGIN_TYPE, PaneId::ROOT);
 
         HypertileRuntime {
             core,

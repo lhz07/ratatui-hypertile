@@ -22,7 +22,8 @@ impl HypertileState {
         if self.pane_path_cached(new_id).is_some() {
             return Err(StateError::DuplicatePaneId(new_id));
         }
-        let focused = node_mut_at_path(&mut self.root, &self.focused_path)?;
+        let root = self.root.as_mut().ok_or(StateError::EmptyTree)?;
+        let focused = node_mut_at_path(root, &self.focused_path)?;
         let ratio = normalize_ratio(ratio);
 
         let old = match std::mem::replace(focused, Node::Pane(PaneId::ROOT)) {
@@ -47,20 +48,40 @@ impl HypertileState {
     }
 
     pub fn remove(&mut self, id: PaneId) -> Result<(), StateError> {
-        if let Some(fid) = self.full_pane
-            && fid == id
-        {
-            self.full_pane.take();
+        if let Some(fid) = self.full_pane {
+            if fid == id {
+                self.full_pane.take();
+            }
         }
+
+        // 先获取路径的副本，避免长期借用 pane_paths
         let path = self
             .pane_paths
-            .get_mut(&id)
+            .get(&id)
+            .cloned()
             .ok_or(StateError::InvalidPath)?;
+
+        // 情况 1：删除的是根 pane
+        if path.is_empty() {
+            match &self.root {
+                Some(Node::Pane(current_id)) if *current_id == id => {
+                    self.root = None;
+                    self.focused_path.clear();
+                    self.rebuild_pane_index();
+                    self.invalidate_layout_cache();
+                    return Ok(());
+                }
+                _ => return Err(StateError::InvalidPath),
+            }
+        }
+
+        // 情况 2：正常从父容器中删除
         let parent_len = path.len() - 1;
         let child_idx = path[parent_len];
         let sibling_idx = 1 - child_idx;
 
-        let parent = node_mut_at_path(&mut self.root, &path[..parent_len])?;
+        let root = self.root.as_mut().ok_or(StateError::EmptyTree)?;
+        let parent = node_mut_at_path(root, &path[..parent_len])?;
 
         let Node::Split { first, second, .. } = parent else {
             return Err(StateError::ParentNodeNotSplit);
@@ -74,7 +95,10 @@ impl HypertileState {
 
         *parent = sibling;
 
-        path.truncate(parent_len);
+        // 更新 pane_paths 中保存的路径（原先的 clone 不会自动同步回去）
+        if let Some(stored_path) = self.pane_paths.get_mut(&id) {
+            stored_path.truncate(parent_len);
+        }
 
         self.rebuild_pane_index();
         self.invalidate_layout_cache();
@@ -85,22 +109,30 @@ impl HypertileState {
     ///
     /// Returns the removed pane id.
     pub fn remove_focused(&mut self) -> Result<PaneId, StateError> {
-        if self.focused_path.is_empty() {
-            return Err(StateError::CannotRemoveRootPane);
-        }
-
         let removed_id = self.focused_pane().ok_or(StateError::FocusedNodeNotPane)?;
 
-        if let Some(fid) = self.full_pane
-            && fid == removed_id
-        {
-            self.full_pane.take();
+        if let Some(fid) = self.full_pane {
+            if fid == removed_id {
+                self.full_pane.take();
+            }
         }
+
+        // 情况 1：焦点在根 pane（整棵树只有一个窗口）
+        if self.focused_path.is_empty() {
+            self.root = None;
+            self.focused_path.clear();
+            self.rebuild_pane_index();
+            self.invalidate_layout_cache();
+            return Ok(removed_id);
+        }
+
+        // 情况 2：正常删除，父容器提升兄弟
         let parent_len = self.focused_path.len() - 1;
         let child_idx = self.focused_path[parent_len];
         let sibling_idx = 1 - child_idx;
 
-        let parent = node_mut_at_path(&mut self.root, &self.focused_path[..parent_len])?;
+        let root = self.root.as_mut().ok_or(StateError::EmptyTree)?;
+        let parent = node_mut_at_path(root, &self.focused_path[..parent_len])?;
 
         let Node::Split { first, second, .. } = parent else {
             return Err(StateError::ParentNodeNotSplit);
@@ -115,8 +147,12 @@ impl HypertileState {
         *parent = sibling;
 
         self.focused_path.truncate(parent_len);
+        // 保持焦点在左叶子
         while matches!(
-            node_at_path(&self.root, &self.focused_path),
+            node_at_path(
+                self.root.as_ref().ok_or(StateError::EmptyTree)?,
+                &self.focused_path
+            ),
             Some(Node::Split { .. })
         ) {
             self.focused_path.push(0);
@@ -160,9 +196,9 @@ impl HypertileState {
         let Some(&child_idx) = self.focused_path.last() else {
             return Ok(false);
         };
-
+        let root = self.root.as_mut().ok_or(StateError::EmptyTree)?;
         let parent_path = &self.focused_path[..self.focused_path.len() - 1];
-        let parent = node_mut_at_path(&mut self.root, parent_path)?;
+        let parent = node_mut_at_path(root, parent_path)?;
 
         let Node::Split { ratio, .. } = parent else {
             return Err(StateError::ParentNodeNotSplit);
@@ -205,9 +241,10 @@ impl HypertileState {
         if self.focused_path.is_empty() {
             return Ok(false);
         }
+        let root = self.root.as_mut().ok_or(StateError::EmptyTree)?;
 
         let parent_path = &self.focused_path[..self.focused_path.len() - 1];
-        let parent = node_mut_at_path(&mut self.root, parent_path)?;
+        let parent = node_mut_at_path(root, parent_path)?;
 
         let Node::Split { ratio: current, .. } = parent else {
             return Err(StateError::ParentNodeNotSplit);

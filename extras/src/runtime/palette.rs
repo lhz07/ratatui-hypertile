@@ -342,8 +342,13 @@ mod tests {
 
     #[test]
     fn interact_on_mounted_plugin_switches_to_plugin_input_mode() {
+        use ratatui_hypertile::HypertileAction;
         let mut runtime = HypertileRuntime::new();
         runtime.register_plugin_type("cpu", || Dummy);
+        // Create initial pane since root is now None
+        let _ = runtime.apply_core_action(HypertileAction::SplitFocused {
+            direction: ratatui::layout::Direction::Horizontal,
+        });
         runtime.replace_focused_plugin("cpu").unwrap();
         assert_eq!(runtime.mode(), InputMode::Layout);
 

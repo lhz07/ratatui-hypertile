@@ -62,7 +62,7 @@ impl HypertileState {
     /// If `focused_path` is stale, falls back to the leftmost leaf under the deepest valid node.
     #[must_use]
     pub fn focused_pane(&self) -> Option<PaneId> {
-        let mut current = &self.root;
+        let mut current = self.root.as_ref()?;
 
         for &idx in &self.focused_path {
             let Node::Split { first, second, .. } = current else {

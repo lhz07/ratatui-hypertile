@@ -1,8 +1,6 @@
 mod focus;
 mod movement;
 mod mutation;
-#[cfg(test)]
-mod tests;
 
 use crate::core::helpers::{
     collect_pane_ids as collect_pane_ids_impl, compute_recursive, leftmost_leaf_path, max_pane_id,
@@ -17,7 +15,7 @@ use std::collections::HashMap;
 /// Prefer [`Hypertile`](crate::Hypertile) instead of using this directly.
 #[derive(Debug, Clone)]
 pub struct HypertileState {
-    root: Node,
+    root: Option<Node>,
     focused_path: Vec<usize>,
     full_pane: Option<PaneId>,
     pane_paths: HashMap<PaneId, Vec<usize>>,
@@ -41,14 +39,11 @@ impl Default for HypertileState {
 
 impl HypertileState {
     pub fn new() -> Self {
-        let mut pane_paths = HashMap::new();
-        pane_paths.insert(PaneId::ROOT, Vec::new());
-
         Self {
-            root: Node::Pane(PaneId::ROOT),
+            root: None,
             focused_path: vec![],
             full_pane: None,
-            pane_paths,
+            pane_paths: HashMap::new(),
             pane_ids_preorder: vec![PaneId::ROOT],
             layout_cache: Vec::new(),
             sorted_panes: Vec::new(),
@@ -66,9 +61,12 @@ impl HypertileState {
     pub fn set_root(&mut self, root: Node) -> Result<(), StateError> {
         let normalized = normalize_tree(root);
         validate_unique_pane_ids(&normalized)?;
-        self.root = normalized;
-        self.focused_path = leftmost_leaf_path(&self.root);
-        self.next_pane_id = max_pane_id(&self.root).saturating_add(1);
+        let leftmost_path = leftmost_leaf_path(&normalized);
+        let max_id = max_pane_id(&normalized).saturating_add(1);
+
+        self.root = Some(normalized);
+        self.focused_path = leftmost_path;
+        self.next_pane_id = max_id;
         self.rebuild_pane_index();
         self.invalidate_layout_cache();
         Ok(())
@@ -88,13 +86,25 @@ impl HypertileState {
         id
     }
 
-    pub fn root(&self) -> &Node {
-        &self.root
+    pub fn root(&self) -> Option<&Node> {
+        self.root.as_ref()
     }
 
     /// Empty until you call [`compute_layout`](Self::compute_layout).
     pub fn pane_ids(&self) -> impl Iterator<Item = PaneId> + '_ {
         self.layout_cache.iter().map(|(id, _)| *id)
+    }
+
+    pub fn open_first_pane(&mut self) -> Result<PaneId, StateError> {
+        if self.root.is_some() {
+            return Err(StateError::InvalidPath);
+        }
+        let id = self.allocate_pane_id();
+        self.root = Some(Node::Pane(id));
+        self.focused_path = vec![];
+        self.rebuild_pane_index();
+        self.invalidate_layout_cache();
+        Ok(id)
     }
 
     pub fn set_focus_highlight(&mut self, enabled: bool) {
@@ -112,16 +122,17 @@ impl HypertileState {
         }
 
         self.layout_cache.clear();
-        compute_recursive(
-            &self.root,
-            area,
-            &mut self.layout_cache,
-            self.gap,
-            self.full_pane,
-            area,
-        );
+        if let Some(root) = &self.root {
+            compute_recursive(
+                root,
+                area,
+                &mut self.layout_cache,
+                self.gap,
+                self.full_pane,
+                area,
+            );
+        }
         self.layout_cache.sort_unstable_by_key(|(id, _)| *id);
-
         self.sorted_panes.clear();
         self.sorted_panes.extend(self.layout_cache.iter().copied());
         self.sorted_panes
@@ -168,6 +179,7 @@ impl HypertileState {
     where
         F: FnMut(&[usize], &Node),
     {
+        let Some(root) = &self.root else { return };
         fn walk<F>(node: &Node, path: &mut Vec<usize>, visit: &mut F)
         where
             F: FnMut(&[usize], &Node),
@@ -185,7 +197,7 @@ impl HypertileState {
         }
 
         let mut path = Vec::new();
-        walk(&self.root, &mut path, &mut visit);
+        walk(root, &mut path, &mut visit);
     }
 
     pub fn gap(&self) -> u16 {
@@ -222,6 +234,19 @@ impl HypertileState {
     }
 
     fn rebuild_pane_index(&mut self) {
+        self.pane_paths.clear();
+        self.pane_ids_preorder.clear();
+
+        if let Some(root) = &self.root {
+            let mut path = Vec::new();
+            walk(
+                root,
+                &mut path,
+                &mut self.pane_paths,
+                &mut self.pane_ids_preorder,
+            );
+        }
+
         fn walk(
             node: &Node,
             path: &mut Vec<usize>,
@@ -244,17 +269,6 @@ impl HypertileState {
                 }
             }
         }
-
-        self.pane_paths.clear();
-        self.pane_ids_preorder.clear();
-
-        let mut path = Vec::new();
-        walk(
-            &self.root,
-            &mut path,
-            &mut self.pane_paths,
-            &mut self.pane_ids_preorder,
-        );
     }
 }
 

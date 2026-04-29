@@ -245,7 +245,10 @@ impl HypertileRuntime {
     }
 
     pub fn close_focused(&mut self) -> Result<PaneId, RuntimeError> {
-        let removed_id = self.core.focused_pane().unwrap();
+        let removed_id = self
+            .core
+            .focused_pane()
+            .ok_or(RuntimeError::NoFocusedPane)?;
         self.registry.remove_plugin_if_exists(removed_id);
         Ok(removed_id)
     }
@@ -437,7 +440,7 @@ impl HypertileRuntime {
         plugin.on_event(event)
     }
 
-    fn apply_core_action(&mut self, action: HypertileAction) -> EventOutcome {
+    pub fn apply_core_action(&mut self, action: HypertileAction) -> EventOutcome {
         let can_animate = self.can_animate_action(action);
         let now = Instant::now();
         if can_animate {
@@ -503,9 +506,11 @@ impl HypertileRuntime {
     }
 
     fn sync_registry_to_core(&mut self) {
-        let keep: HashSet<PaneId> = raw::collect_pane_ids(self.core.root())
-            .into_iter()
-            .collect();
+        let Some(root) = self.core.root() else {
+            self.registry.clear();
+            return;
+        };
+        let keep: HashSet<PaneId> = raw::collect_pane_ids(root).into_iter().collect();
         self.registry.retain_only(&keep);
 
         for &pane_id in &keep {

@@ -53,6 +53,7 @@ pub enum StateError {
     UnknownPaneId(PaneId),
     /// Directional operations need [`compute_layout`](crate::Hypertile::compute_layout) first.
     LayoutUnavailable,
+    EmptyTree,
 }
 
 impl std::fmt::Display for StateError {
@@ -66,6 +67,9 @@ impl std::fmt::Display for StateError {
             Self::UnknownPaneId(id) => write!(f, "unknown pane id: {id}"),
             Self::LayoutUnavailable => {
                 write!(f, "directional layout actions require a computed layout")
+            }
+            Self::EmptyTree => {
+                write!(f, "empty tree")
             }
         }
     }

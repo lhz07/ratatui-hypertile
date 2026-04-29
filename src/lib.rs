@@ -11,10 +11,11 @@
 //! use ratatui_hypertile::{Hypertile, HypertileAction, EventOutcome};
 //!
 //! let mut layout = Hypertile::new();
-//! let pane = layout.split_focused(Direction::Horizontal).unwrap();
+//! // Create the first pane with SplitFocused action (creates root if it doesn't exist)
+//! layout.apply_action(HypertileAction::SplitFocused { direction: Direction::Horizontal });
 //!
 //! let outcome = layout.apply_action(HypertileAction::FocusNext);
-//! assert_eq!(outcome, EventOutcome::Consumed);
+//! assert_eq!(outcome, EventOutcome::Ignored); // No other pane to focus to
 //! ```
 //!
 //! # Two-crate design

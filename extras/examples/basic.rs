@@ -14,7 +14,7 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget, Wrap},
 };
-use ratatui_hypertile::{EventOutcome, HypertileEvent, PaneId};
+use ratatui_hypertile::{EventOutcome, HypertileAction, HypertileEvent};
 use ratatui_hypertile_extras::{
     AnimationConfig, HypertilePlugin, HypertileRuntime, ModeIndicator, SplitBehavior,
     WorkspaceRuntime,
@@ -76,9 +76,12 @@ fn main() -> io::Result<()> {
 
     let mut workspace = WorkspaceRuntime::new(build_runtime);
     let rt = workspace.active_runtime_mut();
+    // Create the initial root pane
+    let _ = rt.apply_core_action(HypertileAction::SplitFocused {
+        direction: Direction::Horizontal,
+    });
     let _ = rt.replace_focused_plugin("monitor");
     let _ = rt.split_focused(Some(Direction::Vertical), "logs");
-    let _ = rt.focus_pane(PaneId::ROOT);
     let _ = rt.split_focused(Some(Direction::Horizontal), "network");
 
     let result = run(&mut terminal, &mut workspace);

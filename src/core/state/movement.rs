@@ -20,11 +20,12 @@ impl HypertileState {
         }
 
         let mut target: Option<usize> = None;
+        let root = self.root.as_mut().ok_or(StateError::EmptyTree)?;
         for i in (0..self.focused_path.len()).rev() {
             let child_idx = self.focused_path[i];
 
             let is_match = matches!(
-                node_at_path(&self.root, &self.focused_path[..i]),
+                node_at_path(root, &self.focused_path[..i]),
                 Some(Node::Split { direction, .. }) if *direction == move_dir
             );
 
@@ -41,7 +42,7 @@ impl HypertileState {
         }
 
         if let Some(target_i) = target {
-            let parent = node_mut_at_path(&mut self.root, &self.focused_path[..target_i])?;
+            let parent = node_mut_at_path(root, &self.focused_path[..target_i])?;
             let Node::Split { first, second, .. } = parent else {
                 return Err(StateError::ParentNodeNotSplit);
             };
@@ -86,15 +87,16 @@ impl HypertileState {
         let Some(target_path) = self.pane_path(target_id) else {
             return Err(StateError::UnknownPaneId(target_id));
         };
+        let root = self.root.as_mut().ok_or(StateError::EmptyTree)?;
 
-        let focused_node = node_mut_at_path(&mut self.root, &focused_path)?;
+        let focused_node = node_mut_at_path(root, &focused_path)?;
         let Node::Pane(focused_leaf_id) = focused_node else {
             return Err(StateError::FocusedNodeNotPane);
         };
         let original_focused_id = *focused_leaf_id;
         *focused_leaf_id = target_id;
 
-        let target_node = node_mut_at_path(&mut self.root, &target_path)?;
+        let target_node = node_mut_at_path(root, &target_path)?;
         let Node::Pane(target_leaf_id) = target_node else {
             return Err(StateError::FocusedNodeNotPane);
         };
