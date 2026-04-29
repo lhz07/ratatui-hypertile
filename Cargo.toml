@@ -16,7 +16,13 @@ keywords = ["tiling", "layout", "ratatui", "tui", "panes"]
 categories = ["command-line-interface"]
 
 [dependencies]
+log.workspace = true
+ratatui.workspace = true
+
+[workspace.dependencies]
+log = "0.4.29"
 ratatui = { version = "0.30", default-features = false, features = ["crossterm"] }
+
 
 [patch."https://github.com/lhz07/wezterm_hyprtui.git"]
 wezterm-term = { path = "../wezterm_hyprtui/term" }

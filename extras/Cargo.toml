@@ -12,13 +12,13 @@ categories = ["command-line-interface"]
 
 [dependencies]
 ratatui-hypertile = { version = "0.3.0", path = "..", default-features = false }
-ratatui = { version = "0.30", default-features = false }
+ratatui.workspace = true
 portable-pty = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 tokio = { version = "1.52.1", features = ["net", "fs", "rt", "rt-multi-thread", "sync", "macros", "io-util"] }
 libc = "0.2.185"
 anyhow = "1.0.102"
 tui-logger = "0.18.2"
-log = "0.4.29"
+log.workspace = true
 wezterm-term = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 wezterm-cell = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 wezterm-surface = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
