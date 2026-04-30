@@ -18,7 +18,7 @@ use ratatui_hypertile::{EventOutcome, HypertileAction, HypertileEvent};
 use ratatui_hypertile_extras::{
     AnimationConfig, HypertilePlugin, HypertileRuntime, ModeIndicator, SplitBehavior,
     WorkspaceRuntime,
-    pty::{PICKER, PtyPlugin},
+    pty::{CURSOR_POS, PICKER, PtyPlugin},
 };
 use std::{
     io::{self, stdout},
@@ -97,7 +97,6 @@ fn run(
 ) -> io::Result<()> {
     let tick_rate = Duration::from_millis(300);
     let mut last_tick = Instant::now();
-
     loop {
         terminal.draw(|frame| {
             let [tabs, gap_top, body, gap_bot, footer] = Layout::vertical([
@@ -123,6 +122,10 @@ fn run(
             )
             .style(Style::default().fg(Color::DarkGray))
             .render(hint_area, frame.buffer_mut());
+            let cursor_pos = CURSOR_POS.take();
+            if let Some(pos) = cursor_pos{
+                frame.set_cursor_position(pos);
+            }
         })?;
 
         // let timeout = workspace.next_frame_in().map_or_else(

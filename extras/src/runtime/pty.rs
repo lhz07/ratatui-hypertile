@@ -6,22 +6,27 @@ use image::{DynamicImage, EncodableLayout, RgbaImage};
 use portable_pty::{
     CommandBuilder, MasterPty, NativePtySystem, PtySize, PtySystem, SlavePty, unix::UnixMasterPty,
 };
-use ratatui::crossterm::event::{
-    self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
-    KeyEventKind, KeyModifiers as CrosstermModifiers,
-};
 use ratatui::{
     buffer::Buffer,
+    crossterm::cursor::SetCursorStyle,
     layout::Rect,
-    style::{Color, Modifier, Style},
+    style::{Color, Style},
     symbols::border,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
+};
+use ratatui::{
+    crossterm::event::{
+        self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
+        KeyEventKind, KeyModifiers as CrosstermModifiers,
+    },
+    layout::Position,
 };
 use ratatui_hypertile::{CellInfo, EventOutcome, HypertileEvent};
 use ratatui_image::picker::{Picker, ProtocolType};
 use std::{
     borrow::Cow,
+    cell::Cell as StdCell,
     collections::HashMap,
     env,
     io::{self, Cursor},
@@ -39,6 +44,7 @@ use tokio::{
         oneshot,
     },
 };
+use wezterm_surface::CursorShape;
 use wezterm_term::{CellRef, KeyCode, KeyModifiers, Terminal, TerminalConfiguration, TerminalSize};
 
 #[derive(Default)]
@@ -150,7 +156,12 @@ impl AsyncWrite for PtyFd {
 }
 
 enum RenderMsg {
-    RenderScreen(Rect, Buffer, oneshot::Sender<Buffer>, bool),
+    RenderScreen(
+        Rect,
+        Buffer,
+        oneshot::Sender<(Buffer, Option<Position>)>,
+        bool,
+    ),
     SetDirty,
     AniStart,
     AniStop,
@@ -163,7 +174,7 @@ impl RenderMsg {
         area: Rect,
         buf: Buffer,
         is_focused: bool,
-    ) -> (Self, oneshot::Receiver<Buffer>) {
+    ) -> (Self, oneshot::Receiver<(Buffer, Option<Position>)>) {
         let (tx, rx) = oneshot::channel();
         (Self::RenderScreen(area, buf, tx, is_focused), rx)
     }
@@ -332,10 +343,17 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
             let term = TerminalWidget::new(state);
             // let ins = std::time::Instant::now();
             term.render(block.inner(area), &mut buf);
+            let mut cursor_pos = None;
+            if is_focused {
+                let cursor_info = state.get_cursor_info();
+                if cursor_info.visibility == wezterm_surface::CursorVisibility::Visible {
+                    cursor_pos = draw_cursor(area, cursor_info);
+                }
+            }
             // about 50 - 500 micro seconds
             // log::info!("render terminal cost: {:?}", ins.elapsed());
             block.render(area, &mut buf);
-            if tx.send(buf).is_err() {
+            if tx.send((buf, cursor_pos)).is_err() {
                 log::error!("can not send pty buffer back")
             }
         }
@@ -537,12 +555,15 @@ impl HypertilePlugin for PtyPlugin {
             }
         }
         // let ins = std::time::Instant::now();
-        let Ok(mut buffer) = rx.blocking_recv() else {
+        let Ok((mut buffer, cursor_pos)) = rx.blocking_recv() else {
             return;
         };
         // log::info!("recv msg cost: {:?}", ins.elapsed());
         mem::swap(&mut buffer, buf);
-        // // log::info!("render term");
+        // log::info!("render term");
+        if cursor_pos.is_some() {
+            CURSOR_POS.set(cursor_pos);
+        }
     }
     fn on_unmount(&mut self, _ctx: crate::PluginContext) {
         self.close();
@@ -689,8 +710,8 @@ impl TerminalState {
         let cursor = state.cursor_pos();
 
         CursorInfo {
-            x: cursor.x,
-            y: cursor.y - self.view_row,
+            x: cursor.x + 1,
+            y: cursor.y - self.view_row + 1,
             shape: cursor.shape,
             visibility: cursor.visibility,
         }
@@ -726,11 +747,6 @@ impl Widget for TerminalWidget<'_> {
         let paragraph = Paragraph::new(lines).scroll((0, 0));
 
         paragraph.render(area, buf);
-
-        let cursor_info = self.state.get_cursor_info();
-        if cursor_info.visibility == wezterm_surface::CursorVisibility::Visible {
-            Self::draw_cursor(area, buf, cursor_info);
-        }
         if self.state.ani_active > 0 || matches!(PICKER.protocol_type(), ProtocolType::Halfblocks) {
             return;
         }
@@ -869,42 +885,30 @@ fn iterm2_from_env() -> Option<ProtocolType> {
     None
 }
 
-impl TerminalWidget<'_> {
-    fn draw_cursor(area: Rect, buf: &mut Buffer, cursor: CursorInfo) {
-        let cursor_x = area.left().saturating_add(cursor.x as u16);
-        let cursor_y = area.top().saturating_add(cursor.y as u16);
+thread_local! {
+    pub static CURSOR_POS: StdCell<Option<Position>> = StdCell::new(None);
+}
 
-        if cursor_x >= area.right() || cursor_y >= area.bottom() {
-            return;
-        }
+fn draw_cursor(area: Rect, cursor: CursorInfo) -> Option<Position> {
+    let cursor_x = area.left().saturating_add(cursor.x as u16);
+    let cursor_y = area.top().saturating_add(cursor.y as u16);
 
-        if let Some(cell) = &mut buf.cell_mut((cursor_x, cursor_y)) {
-            match cursor.shape {
-                wezterm_surface::CursorShape::Default
-                | wezterm_surface::CursorShape::SteadyBlock => {
-                    cell.bg = Color::Reset;
-                    cell.fg = Color::Reset;
-                    cell.modifier |= Modifier::REVERSED;
-                }
-                wezterm_surface::CursorShape::BlinkingBlock => {
-                    cell.bg = Color::Reset;
-                    cell.fg = Color::Reset;
-                    cell.modifier |= Modifier::REVERSED | Modifier::SLOW_BLINK;
-                }
-                wezterm_surface::CursorShape::BlinkingBar => {
-                    cell.modifier |= Modifier::UNDERLINED | Modifier::SLOW_BLINK;
-                }
-                wezterm_surface::CursorShape::SteadyBar => {
-                    cell.modifier |= Modifier::UNDERLINED;
-                }
-                wezterm_surface::CursorShape::BlinkingUnderline => {
-                    cell.modifier |= Modifier::UNDERLINED | Modifier::SLOW_BLINK;
-                }
-                wezterm_surface::CursorShape::SteadyUnderline => {
-                    cell.modifier |= Modifier::UNDERLINED;
-                }
-            }
-        }
+    if cursor_x >= area.right() || cursor_y + 1 >= area.bottom() {
+        return None;
+    }
+    let _ = ratatui::crossterm::execute!(std::io::stdout(), wez_to_cross(cursor.shape));
+    Some((cursor_x, cursor_y).into())
+}
+
+fn wez_to_cross(shape: CursorShape) -> SetCursorStyle {
+    match shape {
+        CursorShape::BlinkingBar => SetCursorStyle::BlinkingBar,
+        CursorShape::BlinkingBlock => SetCursorStyle::BlinkingBlock,
+        CursorShape::BlinkingUnderline => SetCursorStyle::BlinkingUnderScore,
+        CursorShape::Default => SetCursorStyle::DefaultUserShape,
+        CursorShape::SteadyBar => SetCursorStyle::SteadyBar,
+        CursorShape::SteadyBlock => SetCursorStyle::SteadyBlock,
+        CursorShape::SteadyUnderline => SetCursorStyle::SteadyUnderScore,
     }
 }
 
