@@ -12,7 +12,7 @@ mod types;
 mod widget;
 pub(crate) mod workspace;
 
-use crate::registry::{HypertilePlugin, Registry};
+use crate::registry::{HypertilePlugin, PluginInstance, Registry};
 use ratatui::crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers, MouseEventKind};
 use ratatui::layout::{Direction, Position, Rect};
 use ratatui_hypertile::{
@@ -244,6 +244,18 @@ impl HypertileRuntime {
         Ok(pane_id)
     }
 
+    /// Splits the focused pane and insert a plugin instance in the new pane.
+    // we insert the plugin to the other runtime, so no need to show animations here.
+    pub fn split_focused_with_plugin(
+        &mut self,
+        direction: Option<Direction>,
+        plugin: PluginInstance,
+    ) -> Result<PaneId, RuntimeError> {
+        let pane_id = self.core.split_focused(direction)?;
+        self.registry.insert_plugin(pane_id, plugin);
+        Ok(pane_id)
+    }
+
     pub fn close_focused(&mut self) -> Result<PaneId, RuntimeError> {
         let removed_id = self
             .core
@@ -251,6 +263,20 @@ impl HypertileRuntime {
             .ok_or(RuntimeError::NoFocusedPane)?;
         self.registry.remove_plugin_if_exists(removed_id);
         Ok(removed_id)
+    }
+
+    pub fn pop_focused(&mut self) -> Result<PluginInstance, RuntimeError> {
+        let removed_id = self
+            .core
+            .focused_pane()
+            .ok_or(RuntimeError::NoFocusedPane)?;
+        let plugin = self.registry.pop_plugin(removed_id)?;
+        let now = Instant::now();
+
+        self.capture_displayed_rects(now);
+        self.core.close_focused()?;
+        self.start_action_animation(now);
+        Ok(plugin)
     }
 
     pub fn close(&mut self, id: PaneId) -> Result<(), RuntimeError> {

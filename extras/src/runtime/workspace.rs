@@ -1,6 +1,8 @@
 use ratatui::crossterm::event::{Event, KeyCode, KeyModifiers};
 use ratatui::prelude::*;
 use ratatui_hypertile::{EventOutcome, HypertileEvent};
+use std::collections::HashMap;
+use std::sync::LazyLock;
 use std::{
     borrow::Cow,
     time::{Duration, Instant},
@@ -117,6 +119,14 @@ impl WorkspaceRuntime {
         self.go_to_tab(self.tabs.len() - 1);
     }
 
+    pub fn new_tab_silently(&mut self) {
+        let runtime = (self.factory)();
+        self.tabs.push(Tab {
+            label: None,
+            runtime,
+        });
+    }
+
     /// Does nothing if this is the last tab or the index is out of range.
     pub fn close_tab(&mut self, index: usize) {
         if self.tabs.len() <= 1 || index >= self.tabs.len() {
@@ -207,6 +217,22 @@ impl WorkspaceRuntime {
             self.tabs[self.active].runtime.handle_event(&mut event);
             return EventOutcome::Consumed;
         }
+        static SHIFT_MAP: LazyLock<HashMap<char, usize>> = LazyLock::new(|| {
+            [
+                ('!', 1),
+                ('@', 2),
+                ('#', 3),
+                ('$', 4),
+                ('%', 5),
+                ('^', 6),
+                ('&', 7),
+                ('*', 8),
+                ('(', 9),
+                (')', 0),
+            ]
+            .into_iter()
+            .collect()
+        });
         if let HypertileEvent::Term(term) = &event
             && let Event::Key(chord) = term
         {
@@ -244,6 +270,66 @@ impl WorkspaceRuntime {
                         }
                         let base = self.active / 10 * 10;
                         self.go_to_tab(base + i);
+                        return EventOutcome::Consumed;
+                    }
+                    KeyCode::Char(ch) if SHIFT_MAP.contains_key(&ch) => {
+                        let mut i = SHIFT_MAP[&ch];
+                        if i == 0 {
+                            i = 9;
+                        } else {
+                            i -= 1;
+                        }
+                        let base = self.active / 10 * 10;
+                        let target = base + i;
+                        if self.tabs.get(target).is_some()
+                            && let Ok(plugin) = self.tabs[self.active].runtime.pop_focused()
+                        {
+                            let target = &mut self.tabs[target].runtime;
+                            if let Err(e) = target.split_focused_with_plugin(None, plugin) {
+                                log::error!("Can not insert plugin into other workspace: {e}");
+                            }
+                            if let Some(area) = self.area {
+                                target.core.compute_layout(area);
+                            }
+                        }
+                        return EventOutcome::Consumed;
+                    }
+                    _ => (),
+                }
+            } else if chord.modifiers == KeyModifiers::ALT | KeyModifiers::SHIFT {
+                match chord.code {
+                    KeyCode::Right => {
+                        let target = self.active + 1;
+                        if target >= self.tabs.len() {
+                            self.new_tab_silently();
+                        }
+                        if let Ok(plugin) = self.tabs[self.active].runtime.pop_focused() {
+                            let target = &mut self.tabs[target].runtime;
+                            if let Err(e) = target.split_focused_with_plugin(None, plugin) {
+                                log::error!("Can not insert plugin into other workspace: {e}");
+                            }
+                            if let Some(area) = self.area {
+                                target.core.compute_layout(area);
+                            }
+                        }
+
+                        return EventOutcome::Consumed;
+                    }
+                    KeyCode::Left => {
+                        if self.active == 0 {
+                            return EventOutcome::Consumed;
+                        }
+                        let target = self.active - 1;
+                        if let Ok(plugin) = self.tabs[self.active].runtime.pop_focused() {
+                            let target = &mut self.tabs[target].runtime;
+                            if let Err(e) = target.split_focused_with_plugin(None, plugin) {
+                                log::error!("Can not insert plugin into other workspace: {e}");
+                            }
+                            if let Some(area) = self.area {
+                                target.core.compute_layout(area);
+                            }
+                        }
+
                         return EventOutcome::Consumed;
                     }
                     _ => (),

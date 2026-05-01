@@ -117,6 +117,10 @@ impl Registry {
         );
     }
 
+    pub fn insert_plugin(&mut self, pane_id: PaneId, plugin: PluginInstance) {
+        self.instances.insert(pane_id, plugin);
+    }
+
     /// Calls `on_unmount` and removes the plugin for `pane_id`.
     pub fn remove_plugin(&mut self, pane_id: PaneId) -> Result<(), RegistryError> {
         let Some(mut instance) = self.instances.remove(&pane_id) else {
@@ -124,6 +128,14 @@ impl Registry {
         };
         instance.plugin.on_unmount(PluginContext { pane_id });
         Ok(())
+    }
+
+    /// Pop the plugin and keep it alive
+    pub fn pop_plugin(&mut self, pane_id: PaneId) -> Result<PluginInstance, RegistryError> {
+        let Some(instance) = self.instances.remove(&pane_id) else {
+            return Err(RegistryError::MissingPane(pane_id));
+        };
+        Ok(instance)
     }
 
     /// Returns `true` if a plugin was removed.

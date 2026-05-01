@@ -47,22 +47,22 @@ cargo run --example core_only
 
 ### Workspace
 
-| Key            | Operation                    |
-| -------------- | ---------------------------- |
-| Ctrl + Alt + t | create new workspace         |
-| Ctrl + Alt + w | close current workspace      |
-| Alt + 0-9      | switch to specific workspace |
-| Alt + ←/→      | switch workspace             |
+| Key               | Operation                    |
+| ----------------- | ---------------------------- |
+| Ctrl + Alt + t    | create new workspace         |
+| Ctrl + Alt + w    | close current workspace      |
+| Alt + 0-9         | switch to specific workspace |
+| Alt + ←/→         | switch workspace             |
+| Alt + Shift + 0-9 | send to specific workspace   |
+| Alt + Shift + ←/→ | send to left/right workspace |
 
 ### Unimplemented (will support soon)
 
-| Key               | Operation                    |
-| ----------------- | ---------------------------- |
-| Alt + Shift + 0-9 | send to specific workspace   |
-| Alt + Shift + ←/→ | send to left/right workspace |
-| Alt + f           | toggle fullscreen            |
-| Alt + /           | toggle cheatsheet            |
-| Alt + j           | toggle top bar               |
+| Key     | Operation         |
+| ------- | ----------------- |
+| Alt + f | toggle fullscreen |
+| Alt + / | toggle cheatsheet |
+| Alt + j | toggle top bar    |
 
 ## License
 
