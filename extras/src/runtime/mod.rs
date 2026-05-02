@@ -360,9 +360,6 @@ impl HypertileRuntime {
                     }
                 }
                 Event::Mouse(mouse) => match mouse.kind {
-                    MouseEventKind::ScrollDown
-                    | MouseEventKind::ScrollUp
-                    | MouseEventKind::Down(_) => Ok(self.forward_to_plugin(event)),
                     MouseEventKind::Moved => {
                         let mut focus_id = None;
                         match self.core.state().full_pane() {
@@ -380,16 +377,21 @@ impl HypertileRuntime {
                                 }
                             }
                         }
-                        if let Some(id) = focus_id
-                            && let Some(focus) = self.core.focused_pane()
-                            && id != focus
-                        {
-                            self.focus_pane(id)?;
+                        if let Some(id) = focus_id {
+                            match self.core.focused_pane() {
+                                Some(focus) => {
+                                    if id != focus {
+                                        self.focus_pane(id)?;
+                                    }
+                                }
+                                None => {
+                                    self.focus_pane(id)?;
+                                }
+                            }
                         }
-
-                        Ok(EventOutcome::Consumed)
+                        Ok(self.forward_to_plugin(event))
                     }
-                    _ => Ok(EventOutcome::Ignored),
+                    _ => Ok(self.forward_to_plugin(event)),
                 },
                 _ => Ok(self.forward_to_plugin(event)),
             },

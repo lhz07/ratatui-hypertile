@@ -35,27 +35,6 @@ impl MoveBindings {
 
 impl HypertileRuntime {
     pub(super) fn default_layout_action(&self, chord: KeyEvent) -> Option<RuntimeAction> {
-        // const SHIFT_ARROW_MOVES: [(KeyCode, Direction, Towards); 4] = [
-        //     (KeyCode::Left, Direction::Horizontal, Towards::Start),
-        //     (KeyCode::Right, Direction::Horizontal, Towards::End),
-        //     (KeyCode::Down, Direction::Vertical, Towards::End),
-        //     (KeyCode::Up, Direction::Vertical, Towards::Start),
-        // ];
-
-        // if self.move_bindings.includes_shift_arrows()
-        //     && chord.modifiers == KeyModifiers::SHIFT | KeyModifiers::ALT
-        // {
-        //     for &(code, direction, towards) in &SHIFT_ARROW_MOVES {
-        //         if chord.code == code {
-        //             return Some(RuntimeAction::Core(HypertileAction::MoveFocused {
-        //                 direction,
-        //                 towards,
-        //                 scope: self.default_move_scope,
-        //             }));
-        //         }
-        //     }
-        // }
-
         const VIM_MOVES: [(char, Direction, Towards); 4] = [
             ('H', Direction::Horizontal, Towards::Start),
             ('L', Direction::Horizontal, Towards::End),

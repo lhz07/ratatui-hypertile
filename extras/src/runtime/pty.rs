@@ -18,7 +18,8 @@ use ratatui::{
 use ratatui::{
     crossterm::event::{
         self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
-        KeyEventKind, KeyModifiers as CrosstermModifiers,
+        KeyEventKind, KeyModifiers as CrosstermModifiers, MouseEvent as CrosstermMouseEvent,
+        MouseEventKind as CrosstermMouseEventKind,
     },
     layout::Position,
 };
@@ -45,7 +46,10 @@ use tokio::{
     },
 };
 use wezterm_surface::CursorShape;
-use wezterm_term::{CellRef, KeyCode, KeyModifiers, Terminal, TerminalConfiguration, TerminalSize};
+use wezterm_term::{
+    CellRef, KeyCode, KeyModifiers, MouseEventKind, Terminal, TerminalConfiguration, TerminalSize,
+};
+use wezterm_term::{MouseButton, input::MouseEvent};
 
 #[derive(Default)]
 pub struct PtyPlugin {
@@ -358,7 +362,7 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
             }
         }
         RenderMsg::SetSize(rect) => {
-            state.resize(rect.width, rect.height);
+            state.resize(rect);
         }
         RenderMsg::SetDirty => state.dirty = true,
         RenderMsg::AniStart => state.ani_active += 1,
@@ -393,6 +397,13 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
                     }
                 }
                 CrosstermEvent::Mouse(mouse) => {
+                    if state.terminal.is_alt_screen_active() {
+                        // pass mouse event to the terminal
+                        let event = mouse_convert(mouse, state);
+                        if let Err(e) = state.terminal.mouse_event(event) {
+                            log::error!("mouse event: {e}");
+                        }
+                    }
                     let offset = match mouse.kind {
                         event::MouseEventKind::ScrollDown => 1,
                         event::MouseEventKind::ScrollUp => -1,
@@ -600,6 +611,7 @@ struct Image {
 struct TerminalState {
     view_row: i64,
     size: TerminalSize,
+    area: Rect,
     terminal: Terminal,
     program: String,
     dirty: bool,
@@ -616,12 +628,14 @@ impl TerminalState {
             dirty: true,
             ani_active: 0,
             size,
+            area: Rect::default(),
             images: HashMap::new(),
         }
     }
-    pub fn resize(&mut self, cols: u16, rows: u16) {
+    pub fn resize(&mut self, area: Rect) {
         self.dirty = true;
-        self.size.resize(cols, rows);
+        self.area = area;
+        self.size.resize(area.width, area.height);
         self.terminal.resize(self.size);
     }
     /// 将终端屏幕转换为 Ratatui 的 Line
@@ -912,7 +926,63 @@ fn wez_to_cross(shape: CursorShape) -> SetCursorStyle {
     }
 }
 
-pub fn crossterm_to_wezterm(event: CrosstermKeyEvent) -> Option<(KeyCode, KeyModifiers)> {
+fn convert_mouse_buttons(button: event::MouseButton) -> MouseButton {
+    match button {
+        event::MouseButton::Left => MouseButton::Left,
+        event::MouseButton::Right => MouseButton::Right,
+        event::MouseButton::Middle => MouseButton::Middle,
+    }
+}
+
+fn mouse_convert(event: CrosstermMouseEvent, state: &mut TerminalState) -> MouseEvent {
+    let mut button = MouseButton::None;
+    let kind = match event.kind {
+        CrosstermMouseEventKind::Down(btn) => {
+            button = convert_mouse_buttons(btn);
+            MouseEventKind::Press
+        }
+        CrosstermMouseEventKind::Up(btn) => {
+            button = convert_mouse_buttons(btn);
+            MouseEventKind::Release
+        }
+        CrosstermMouseEventKind::Drag(btn) => {
+            button = convert_mouse_buttons(btn);
+            MouseEventKind::Move
+        }
+        CrosstermMouseEventKind::Moved => MouseEventKind::Move,
+        CrosstermMouseEventKind::ScrollDown => {
+            button = MouseButton::WheelDown(1);
+            MouseEventKind::Press
+        }
+        CrosstermMouseEventKind::ScrollUp => {
+            button = MouseButton::WheelUp(1);
+            MouseEventKind::Press
+        }
+        CrosstermMouseEventKind::ScrollLeft => {
+            button = MouseButton::WheelLeft(1);
+            MouseEventKind::Press
+        }
+        CrosstermMouseEventKind::ScrollRight => {
+            button = MouseButton::WheelRight(1);
+            MouseEventKind::Press
+        }
+    };
+
+    let modifiers = crossterm_modifiers_to_wezterm(event.modifiers);
+    let x = event.column.saturating_sub(state.area.x);
+    let y = event.row.saturating_sub(state.area.y);
+    MouseEvent {
+        kind,
+        x: x as usize,
+        y: y as i64,
+        x_pixel_offset: CellInfo::pixel_width(x) as isize,
+        y_pixel_offset: CellInfo::pixel_height(y) as isize,
+        button,
+        modifiers,
+    }
+}
+
+fn crossterm_to_wezterm(event: CrosstermKeyEvent) -> Option<(KeyCode, KeyModifiers)> {
     let key_code = match event.code {
         // 普通字符
         CrosstermKeyCode::Char(c) => KeyCode::Char(c),
