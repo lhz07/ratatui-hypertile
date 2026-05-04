@@ -20,5 +20,5 @@ pub use registry::{HypertilePlugin, PluginContext, Registry, RegistryError};
 pub use runtime::{
     AnimationConfig, BorderConfig, HypertileRuntime, HypertileRuntimeBuilder, HypertileView,
     InputMode, ModeIndicator, MoveBindings, RuntimeError, SplitBehavior, TabBar, TabBarItem,
-    WorkspaceAction, WorkspaceRuntime, pty,
+    WorkspaceAction, WorkspaceRuntime, checker, pty, tokio_spawn,
 };

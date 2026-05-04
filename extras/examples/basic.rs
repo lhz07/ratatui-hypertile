@@ -1,7 +1,8 @@
+use futures::StreamExt;
 use ratatui::crossterm::{
     self,
     event::{
-        self, DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
+        DisableBracketedPaste, DisableMouseCapture, EnableBracketedPaste, EnableMouseCapture,
         Event, KeyCode, KeyModifiers, MouseEventKind,
     },
     terminal::EnterAlternateScreen,
@@ -18,16 +19,22 @@ use ratatui_hypertile::{EventOutcome, HypertileAction, HypertileEvent};
 use ratatui_hypertile_extras::{
     AnimationConfig, HypertilePlugin, HypertileRuntime, ModeIndicator, SplitBehavior,
     WorkspaceRuntime,
+    checker::Checker,
     pty::{CURSOR_POS, PICKER, PtyPlugin},
+    tokio_spawn,
 };
 use std::{
     io::{self, stdout},
-    sync::LazyLock,
+    sync::{
+        LazyLock,
+        mpsc::{Receiver, RecvTimeoutError, Sender},
+    },
     time::{Duration, Instant},
 };
+use tokio::sync::mpsc::{Receiver as AsyncReceiver, Sender as AsyncSender};
 use tui_logger::TuiWidgetState;
 
-fn build_runtime() -> HypertileRuntime {
+fn build_runtime(render_req_tx: AsyncSender<()>) -> HypertileRuntime {
     let mut rt = HypertileRuntime::builder()
         .with_split_behavior(SplitBehavior::Placeholder)
         .with_animation_config(AnimationConfig {
@@ -48,9 +55,16 @@ fn build_runtime() -> HypertileRuntime {
         text: String::new(),
     });
     rt.register_plugin_type("network", || NetworkPlugin { tick: 0 });
-    rt.register_plugin_type("fish", || PtyPlugin::new("fish".to_string()));
-    rt.register_plugin_type("zsh", || PtyPlugin::new("zsh".to_string()));
-    rt.register_plugin_type("bash", || PtyPlugin::new("bash".to_string()));
+    let tx = render_req_tx.clone();
+    rt.register_plugin_type("fish", move || {
+        PtyPlugin::new("fish".to_string(), tx.clone())
+    });
+    let tx = render_req_tx.clone();
+    rt.register_plugin_type("zsh", move || PtyPlugin::new("zsh".to_string(), tx.clone()));
+
+    rt.register_plugin_type("bash", move || {
+        PtyPlugin::new("bash".to_string(), render_req_tx.clone())
+    });
     rt
 }
 
@@ -73,8 +87,8 @@ fn main() -> io::Result<()> {
     // enable bracketed paste
     crossterm::execute!(stdout, EnableBracketedPaste)?;
     crossterm::execute!(stdout, EnableMouseCapture)?;
-
-    let mut workspace = WorkspaceRuntime::new(build_runtime);
+    let (render_req_tx, render_req_rx) = tokio::sync::mpsc::channel(100);
+    let mut workspace = WorkspaceRuntime::new(move || build_runtime(render_req_tx.clone()));
     let rt = workspace.active_runtime_mut();
     // Create the initial root pane
     let _ = rt.apply_core_action(HypertileAction::SplitFocused {
@@ -83,17 +97,69 @@ fn main() -> io::Result<()> {
     let _ = rt.replace_focused_plugin("monitor");
     let _ = rt.split_focused(Some(Direction::Vertical), "logs");
     let _ = rt.split_focused(Some(Direction::Horizontal), "network");
-
-    let result = run(&mut terminal, &mut workspace);
+    let (render_tx, render_rx) = std::sync::mpsc::channel::<RenderMsg>();
+    tokio_spawn(handle_render_event(
+        render_tx.clone(),
+        render_req_rx,
+        rt.animation_config().frame_interval,
+    ));
+    tokio_spawn(async move {
+        let res = relay_term_event(render_tx).await;
+        log::info!("relay term event exit: {:?}", res);
+    });
+    let result = run(&mut terminal, &mut workspace, render_rx);
     crossterm::execute!(stdout, DisableBracketedPaste)?;
     crossterm::execute!(stdout, DisableMouseCapture)?;
     ratatui::restore();
     result
 }
 
+#[derive(Debug)]
+enum RenderMsg {
+    Render,
+    Event(Event),
+}
+
+async fn relay_term_event(render_tx: Sender<RenderMsg>) -> io::Result<()> {
+    use crossterm::event::EventStream;
+    let mut stream = EventStream::new();
+    loop {
+        if let Some(event) = stream.next().await {
+            let event = event?;
+            render_tx
+                .send(RenderMsg::Event(event))
+                .map_err(|e| io::Error::other(e))?;
+        }
+    }
+}
+
+async fn handle_render_event(
+    render_tx: Sender<RenderMsg>,
+    mut render_req_rx: AsyncReceiver<()>,
+    frame_interval: Duration,
+) {
+    let mut checker = Checker::new(frame_interval);
+    loop {
+        tokio::select! {
+            _ = checker.wait() => {
+                if render_tx.send(RenderMsg::Render).is_err(){
+                    log::info!("render channel closed");
+                    break;
+                }
+            }
+            Some(_) = render_req_rx.recv() => {
+                checker.activate();
+            }
+            else => break,
+        }
+    }
+    log::info!("handle render event exit");
+}
+
 fn run(
     terminal: &mut ratatui::DefaultTerminal,
     workspace: &mut WorkspaceRuntime,
+    render_rx: Receiver<RenderMsg>,
 ) -> io::Result<()> {
     let tick_rate = Duration::from_millis(300);
     let mut last_tick = Instant::now();
@@ -118,7 +184,7 @@ fn run(
                 Layout::horizontal([Constraint::Length(10), Constraint::Min(0)]).areas(footer);
             ModeIndicator::new(rt.mode()).render(mode_area, frame.buffer_mut());
             Paragraph::new(
-                "Ctrl+Alt+c: quit | Alt+←/→: workspace | Alt+t: split | Alt+q: close | Alt+p: palette",
+                "Ctrl+Alt+c: quit | Alt+←/→: workspace | Alt+e: fish | Alt+q: close | Alt+p: palette",
             )
             .style(Style::default().fg(Color::DarkGray))
             .render(hint_area, frame.buffer_mut());
@@ -128,28 +194,34 @@ fn run(
             }
         })?;
 
-        // let timeout = workspace.next_frame_in().map_or_else(
-        //     || tick_rate.saturating_sub(last_tick.elapsed()),
-        //     |frame| frame.min(tick_rate.saturating_sub(last_tick.elapsed())),
-        // );
-        let timeout = Duration::from_millis(16);
-        if event::poll(timeout)? {
-            let event = event::read()?;
-            // match event {
-            //     Event::Mouse(_) => (),
-            //     Event::Key(key) if key.code == KeyCode::Up || key.code == KeyCode::Down => (),
-            //     _ => match event {
-            //         Event::Paste(_) => log::info!("paste event"),
-            //         _ => log::info!("{:?}", event),
-            //     },
-            // }
-            if let Event::Key(key) = event
-                && key.code == KeyCode::Char('c')
-                && key.modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT
-            {
-                return Ok(());
+        let timeout = workspace.next_frame_in().map_or_else(
+            || tick_rate.saturating_sub(last_tick.elapsed()),
+            |frame| frame.min(tick_rate.saturating_sub(last_tick.elapsed())),
+        );
+        let event = render_rx.recv_timeout(timeout);
+        match event {
+            Ok(RenderMsg::Render) => (),
+            Ok(RenderMsg::Event(event)) => {
+                // match event {
+                //     Event::Mouse(_) => (),
+                //     Event::Key(key) if key.code == KeyCode::Up || key.code == KeyCode::Down => (),
+                //     _ => match event {
+                //         Event::Paste(_) => log::info!("paste event"),
+                //         _ => log::info!("{:?}", event),
+                //     },
+                // }
+                if let Event::Key(key) = event
+                    && key.code == KeyCode::Char('c')
+                    && key.modifiers == KeyModifiers::CONTROL | KeyModifiers::ALT
+                {
+                    return Ok(());
+                }
+                workspace.handle_event(HypertileEvent::Term(event));
             }
-            workspace.handle_event(HypertileEvent::Term(event));
+            Err(RecvTimeoutError::Timeout) => (),
+            Err(e @ RecvTimeoutError::Disconnected) => {
+                log::error!("main event loop: {e}");
+            }
         }
 
         if last_tick.elapsed() >= tick_rate {

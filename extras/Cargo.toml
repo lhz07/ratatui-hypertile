@@ -14,7 +14,7 @@ categories = ["command-line-interface"]
 ratatui-hypertile = { version = "0.3.0", path = "..", default-features = false }
 ratatui.workspace = true
 portable-pty = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
-tokio = { version = "1.52.1", features = ["net", "fs", "rt", "rt-multi-thread", "sync", "macros", "io-util"] }
+tokio = { version = "1.52.1", features = ["net", "fs", "rt", "rt-multi-thread", "sync", "macros", "io-util", "time"] }
 libc = "0.2.185"
 anyhow = "1.0.102"
 tui-logger = "0.18.2"
@@ -27,6 +27,11 @@ ratatui-image = "10.0.6"
 image = "0.25.10"
 base64-simd = "0.8.0"
 icy_sixel = "0.5.0"
+crossterm = { version = "0.29.0",features = ["event-stream"] } 
+futures = "0.3.32"
+
+[dev-dependencies]
+tokio = { version = "1.52.1", features = ["net", "fs", "rt", "rt-multi-thread", "sync", "macros", "io-util", "time", "test-util"] }
 
 [[example]]
 name = "basic"

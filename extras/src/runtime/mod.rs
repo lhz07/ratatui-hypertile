@@ -1,5 +1,6 @@
 mod animation;
 mod builder;
+pub mod checker;
 mod constants;
 mod default_plugin;
 mod keymap;
@@ -38,14 +39,8 @@ use palette::PaletteState;
 
 use tokio::runtime::Runtime;
 
-static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    // console_subscriber::init();
-    tokio::runtime::Builder::new_multi_thread()
-        .worker_threads(1)
-        .enable_all()
-        .build()
-        .expect("Failed to create Tokio runtime")
-});
+static TOKIO_RUNTIME: LazyLock<Runtime> =
+    LazyLock::new(|| tokio::runtime::Runtime::new().expect("Failed to create tokio runtime"));
 
 pub fn tokio_spawn<F>(future: F) -> JoinHandle<F::Output>
 where

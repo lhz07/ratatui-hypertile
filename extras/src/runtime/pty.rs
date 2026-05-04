@@ -41,7 +41,7 @@ use termwiz::image::ImageDataType;
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt, unix::AsyncFd},
     sync::{
-        mpsc::{self, error::TrySendError},
+        mpsc::{self, Sender, error::TrySendError},
         oneshot,
     },
 };
@@ -51,31 +51,27 @@ use wezterm_term::{
 };
 use wezterm_term::{MouseButton, input::MouseEvent};
 
-#[derive(Default)]
 pub struct PtyPlugin {
     mounted: Option<MountedPty>,
+    render: Sender<()>,
     is_closed: bool,
     program: String,
 }
 
 impl PtyPlugin {
-    pub fn new(program: String) -> Self {
+    pub fn new(program: String, render_req_tx: Sender<()>) -> Self {
         Self {
             mounted: None,
+            render: render_req_tx,
             is_closed: false,
             program,
         }
     }
     pub fn close(&mut self) {
-        // TODO: terminate gracefully
         if let Some(mut pty) = self.mounted.take() {
             if let Err(e) = pty.child.kill() {
                 log::error!("kill child: {e}")
             }
-            // match pty.child.wait() {
-            //     Ok(s) => log::info!("child exited with {s}"),
-            //     Err(e) => log::error!("child exit: {e}"),
-            // }
         }
         self.is_closed = true;
     }
@@ -241,7 +237,7 @@ impl MountedPty {
         }
     }
 
-    pub fn create(area: Rect, program: &str) -> anyhow::Result<Self> {
+    pub fn create(area: Rect, program: &str, render_req_tx: Sender<()>) -> anyhow::Result<Self> {
         let rows = area.height.max(MIN_ROW);
         let cols = area.width.max(MIN_COL);
         let pty = NativePtySystem::default();
@@ -271,18 +267,13 @@ impl MountedPty {
                 let mut pty_fd_write = pty_fd.clone();
                 tokio_spawn(async move {
                     let res: Result<(), anyhow::Error> = async {
-                        loop {
-                            let msg = input_rx
-                                .recv()
-                                .await
-                                .ok_or(anyhow::anyhow!("recv input msg"))?;
+                        while let Some(msg) = input_rx.recv().await {
                             pty_fd_write.write_all(&msg.event).await?;
                         }
+                        Ok(())
                     }
                     .await;
-                    if let Err(e) = res {
-                        log::error!("pty input: {e}")
-                    }
+                    log::debug!("pty input finished: {:?}", res);
                 });
                 let config = Arc::new(SimpleTermConfig);
                 let terminal = Terminal::new(size, config, "", "", Box::new(writer));
@@ -298,6 +289,7 @@ impl MountedPty {
                             if n != 0{
                                 // update
                                 state.terminal.advance_bytes(&buf[..n]);
+                                render_req_tx.send(()).await?;
                             } else {
                                 // exit now!
                                 break;
@@ -316,11 +308,7 @@ impl MountedPty {
             }
             .await;
             // log error
-            if let Err(e) = res {
-                log::error!("pty output: {e}")
-            } else {
-                log::debug!("pty output finished");
-            }
+            log::debug!("pty output finished: {:?}", res);
         });
 
         Ok(Self {
@@ -541,7 +529,7 @@ impl HypertilePlugin for PtyPlugin {
                 }
                 pty
             }
-            None => match MountedPty::create(term_area, &self.program) {
+            None => match MountedPty::create(term_area, &self.program, self.render.clone()) {
                 Ok(mounted) => self.mounted.insert(mounted),
                 Err(e) => {
                     log::error!("{e}");
