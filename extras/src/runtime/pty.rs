@@ -10,7 +10,7 @@ use ratatui::{
     buffer::Buffer,
     crossterm::cursor::SetCursorStyle,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     symbols::border,
     text::{Line, Span},
     widgets::{Block, Borders, Paragraph, Widget},
@@ -339,7 +339,7 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
             if is_focused {
                 let cursor_info = state.get_cursor_info();
                 if cursor_info.visibility == wezterm_surface::CursorVisibility::Visible {
-                    cursor_pos = draw_cursor(area, cursor_info);
+                    cursor_pos = draw_cursor(area, cursor_info, &mut buf);
                 }
             }
             // about 50 - 500 micro seconds
@@ -891,15 +891,47 @@ thread_local! {
     pub static CURSOR_POS: StdCell<Option<Position>> = StdCell::new(None);
 }
 
-fn draw_cursor(area: Rect, cursor: CursorInfo) -> Option<Position> {
+fn draw_cursor(area: Rect, cursor: CursorInfo, buf: &mut Buffer) -> Option<Position> {
     let cursor_x = area.left().saturating_add(cursor.x as u16);
     let cursor_y = area.top().saturating_add(cursor.y as u16);
 
     if cursor_x >= area.right() || cursor_y + 1 >= area.bottom() {
         return None;
     }
-    let _ = ratatui::crossterm::execute!(std::io::stdout(), wez_to_cross(cursor.shape));
-    Some((cursor_x, cursor_y).into())
+    if let ProtocolType::Iterm2 = PICKER.protocol_type() {
+        // iTerm2's cursor support is poor, so we draw it.
+        if let Some(cell) = &mut buf.cell_mut((cursor_x, cursor_y)) {
+            match cursor.shape {
+                wezterm_surface::CursorShape::Default
+                | wezterm_surface::CursorShape::SteadyBlock => {
+                    cell.bg = Color::Reset;
+                    cell.fg = Color::Reset;
+                    cell.modifier |= Modifier::REVERSED;
+                }
+                wezterm_surface::CursorShape::BlinkingBlock => {
+                    cell.bg = Color::Reset;
+                    cell.fg = Color::Reset;
+                    cell.modifier |= Modifier::REVERSED | Modifier::SLOW_BLINK;
+                }
+                wezterm_surface::CursorShape::BlinkingBar => {
+                    cell.modifier |= Modifier::UNDERLINED | Modifier::SLOW_BLINK;
+                }
+                wezterm_surface::CursorShape::SteadyBar => {
+                    cell.modifier |= Modifier::UNDERLINED;
+                }
+                wezterm_surface::CursorShape::BlinkingUnderline => {
+                    cell.modifier |= Modifier::UNDERLINED | Modifier::SLOW_BLINK;
+                }
+                wezterm_surface::CursorShape::SteadyUnderline => {
+                    cell.modifier |= Modifier::UNDERLINED;
+                }
+            }
+        }
+        None
+    } else {
+        let _ = ratatui::crossterm::execute!(std::io::stdout(), wez_to_cross(cursor.shape));
+        Some((cursor_x, cursor_y).into())
+    }
 }
 
 fn wez_to_cross(shape: CursorShape) -> SetCursorStyle {

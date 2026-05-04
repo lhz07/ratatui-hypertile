@@ -1,3 +1,4 @@
+use crate::pty::CURSOR_POS;
 use crate::runtime::workspace::Tab;
 
 use super::types::AnimationConfig;
@@ -292,6 +293,8 @@ impl SpaceAnimation {
             tab_b.runtime.render(area, &mut buf_b);
             copy_with_offset(&buf_b, main_buffer, area, offset_b);
         }
+        // do not show cursor during animation
+        CURSOR_POS.take();
     }
 
     pub fn get_current_camera_x(&self) -> f32 {
