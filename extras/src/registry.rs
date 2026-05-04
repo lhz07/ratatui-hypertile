@@ -11,18 +11,25 @@ pub trait HypertilePlugin {
     fn render(&mut self, area: Rect, buf: &mut Buffer, is_focused: bool, target_rect: Option<Rect>);
 
     /// Return [`EventOutcome::Consumed`] to mark it handled.
-    fn on_event(&mut self, _event: &mut HypertileEvent) -> EventOutcome {
+    fn on_event(&mut self, event: &mut HypertileEvent) -> EventOutcome {
+        let _ = event;
         EventOutcome::Ignored
     }
 
-    fn on_mount(&mut self, _ctx: PluginContext) {}
+    fn on_mount(&mut self, ctx: PluginContext) {
+        let _ = ctx;
+    }
 
-    fn on_unmount(&mut self, _ctx: PluginContext) {}
-
-    fn on_resize(&mut self, _cols: u16, _rows: u16) {}
+    fn on_unmount(&mut self, ctx: PluginContext) {
+        let _ = ctx;
+    }
 
     fn is_closed(&mut self) -> bool {
         false
+    }
+
+    fn on_active_change(&mut self, active: bool) {
+        let _ = active;
     }
 }
 
@@ -66,17 +73,23 @@ impl Registry {
         self.factories.keys().map(String::as_str)
     }
 
+    pub fn instances_mut(&mut self) -> &mut HashMap<PaneId, PluginInstance> {
+        &mut self.instances
+    }
+
     /// Creates a fresh plugin, calls `on_mount`, and stores it for `pane_id`.
     pub fn spawn_plugin(
         &mut self,
         plugin_type: &str,
         pane_id: PaneId,
+        active: bool,
     ) -> Result<(), RegistryError> {
         if self.instances.contains_key(&pane_id) {
             return Err(RegistryError::DuplicatePane(pane_id));
         }
         let mut plugin = self.instantiate_plugin(plugin_type)?;
         plugin.on_mount(PluginContext { pane_id });
+        plugin.on_active_change(active);
         self.instances.insert(
             pane_id,
             PluginInstance {
@@ -106,8 +119,10 @@ impl Registry {
         pane_id: PaneId,
         plugin_type: &str,
         mut plugin: Box<dyn HypertilePlugin>,
+        active: bool,
     ) {
         plugin.on_mount(PluginContext { pane_id });
+        plugin.on_active_change(active);
         self.instances.insert(
             pane_id,
             PluginInstance {

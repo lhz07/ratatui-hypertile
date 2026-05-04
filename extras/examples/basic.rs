@@ -90,6 +90,7 @@ fn main() -> io::Result<()> {
     let (render_req_tx, render_req_rx) = tokio::sync::mpsc::channel(100);
     let mut workspace = WorkspaceRuntime::new(move || build_runtime(render_req_tx.clone()));
     let rt = workspace.active_runtime_mut();
+    rt.set_active(true);
     // Create the initial root pane
     let _ = rt.apply_core_action(HypertileAction::SplitFocused {
         direction: Direction::Horizontal,
@@ -200,7 +201,7 @@ fn run(
         );
         let event = render_rx.recv_timeout(timeout);
         match event {
-            Ok(RenderMsg::Render) => (),
+            Ok(RenderMsg::Render) => log::info!("render event"),
             Ok(RenderMsg::Event(event)) => {
                 // match event {
                 //     Event::Mouse(_) => (),

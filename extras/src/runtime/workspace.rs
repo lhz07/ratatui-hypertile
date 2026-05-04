@@ -127,6 +127,12 @@ impl WorkspaceRuntime {
         });
     }
 
+    pub fn set_active(&mut self, active: usize) {
+        self.tabs[self.active].runtime.set_active(false);
+        self.active = active;
+        self.tabs[self.active].runtime.set_active(true);
+    }
+
     /// Does nothing if this is the last tab or the index is out of range.
     pub fn close_tab(&mut self, index: usize) {
         if self.tabs.len() <= 1 || index >= self.tabs.len() {
@@ -134,9 +140,9 @@ impl WorkspaceRuntime {
         }
         self.tabs.remove(index);
         if self.active >= self.tabs.len() {
-            self.active = self.tabs.len() - 1;
+            self.set_active(self.tabs.len() - 1);
         } else if self.active > index {
-            self.active -= 1;
+            self.set_active(self.active - 1);
         }
     }
 
@@ -146,7 +152,7 @@ impl WorkspaceRuntime {
         }
         let new = self.active + 1;
         self.start_animation(new);
-        self.active = new;
+        self.set_active(new);
         true
     }
 
@@ -156,7 +162,7 @@ impl WorkspaceRuntime {
             return;
         }
         self.start_animation(new);
-        self.active = new;
+        self.set_active(new);
     }
 
     fn start_animation(&mut self, new: usize) {
@@ -183,7 +189,7 @@ impl WorkspaceRuntime {
     pub fn go_to_tab(&mut self, index: usize) {
         if index < self.tabs.len() && index != self.active {
             self.start_animation(index);
-            self.active = index;
+            self.set_active(index);
         }
     }
 

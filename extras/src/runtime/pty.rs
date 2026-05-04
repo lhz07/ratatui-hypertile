@@ -54,6 +54,7 @@ use wezterm_term::{MouseButton, input::MouseEvent};
 pub struct PtyPlugin {
     mounted: Option<MountedPty>,
     render: Sender<()>,
+    active: bool,
     is_closed: bool,
     program: String,
 }
@@ -62,6 +63,7 @@ impl PtyPlugin {
     pub fn new(program: String, render_req_tx: Sender<()>) -> Self {
         Self {
             mounted: None,
+            active: false,
             render: render_req_tx,
             is_closed: false,
             program,
@@ -163,6 +165,7 @@ enum RenderMsg {
         bool,
     ),
     SetDirty,
+    SetActive(bool),
     AniStart,
     AniStop,
     Event(HypertileEvent),
@@ -289,7 +292,9 @@ impl MountedPty {
                             if n != 0{
                                 // update
                                 state.terminal.advance_bytes(&buf[..n]);
-                                render_req_tx.send(()).await?;
+                                if state.active{
+                                    render_req_tx.send(()).await?;
+                                }
                             } else {
                                 // exit now!
                                 break;
@@ -351,6 +356,9 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
         }
         RenderMsg::SetSize(rect) => {
             state.resize(rect);
+        }
+        RenderMsg::SetActive(active) => {
+            state.active = active;
         }
         RenderMsg::SetDirty => state.dirty = true,
         RenderMsg::AniStart => state.ani_active += 1,
@@ -451,6 +459,14 @@ impl TerminalConfiguration for SimpleTermConfig {
 }
 
 impl HypertilePlugin for PtyPlugin {
+    fn on_active_change(&mut self, active: bool) {
+        self.active = active;
+        if let Some(pty) = &mut self.mounted {
+            let _ = pty
+                .render_tx
+                .blocking_send(RenderMsg::SetActive(self.active));
+        }
+    }
     fn is_closed(&mut self) -> bool {
         self.is_closed
     }
@@ -530,13 +546,21 @@ impl HypertilePlugin for PtyPlugin {
                 pty
             }
             None => match MountedPty::create(term_area, &self.program, self.render.clone()) {
-                Ok(mounted) => self.mounted.insert(mounted),
+                Ok(mounted) => {
+                    let mounted = self.mounted.insert(mounted);
+                    mounted
+                        .render_tx
+                        .blocking_send(RenderMsg::SetActive(self.active))
+                        .expect("render rx is not dropped here");
+                    mounted
+                }
                 Err(e) => {
                     log::error!("{e}");
                     return;
                 }
             },
         };
+
         let buffer = mem::take(buf);
         let (msg, rx) = RenderMsg::render_screen(area, buffer, is_focused);
         if let Err(e) = pty.render_tx.try_send(msg) {
@@ -599,6 +623,7 @@ struct Image {
 struct TerminalState {
     view_row: i64,
     size: TerminalSize,
+    active: bool,
     area: Rect,
     terminal: Terminal,
     program: String,
@@ -612,6 +637,7 @@ impl TerminalState {
         Self {
             view_row: 0,
             terminal,
+            active: false,
             program,
             dirty: true,
             ani_active: 0,

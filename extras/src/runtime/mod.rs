@@ -75,6 +75,7 @@ where
 /// ```
 pub struct HypertileRuntime {
     core: CoreHypertile,
+    active: bool,
     registry: Registry,
     mode: InputMode,
     palette: PaletteState,
@@ -96,6 +97,24 @@ impl Default for HypertileRuntime {
 impl HypertileRuntime {
     pub fn builder() -> HypertileRuntimeBuilder {
         HypertileRuntimeBuilder::default()
+    }
+
+    pub fn set_active(&mut self, active: bool) {
+        match self.core.state().full_pane() {
+            Some(full_id) => {
+                if let Some(plugin) = self.registry.plugin_instance_mut(full_id) {
+                    plugin.plugin().on_active_change(active);
+                } else {
+                    log::error!("can not find the plugin");
+                }
+            }
+            None => {
+                for (_, plugin) in self.registry.instances_mut() {
+                    plugin.plugin().on_active_change(active);
+                }
+            }
+        }
+        self.active = active;
     }
 
     pub fn new() -> Self {
@@ -209,14 +228,14 @@ impl HypertileRuntime {
     pub fn set_root(&mut self, root: CoreNode) -> Result<(), RuntimeError> {
         self.core.set_root(root)?;
         self.animation_state.clear();
-        self.sync_registry_to_core();
+        self.sync_registry_to_core(self.active);
         Ok(())
     }
 
     pub fn reset(&mut self) {
         self.core.reset();
         self.animation_state.clear();
-        self.sync_registry_to_core();
+        self.sync_registry_to_core(self.active);
     }
 
     /// Splits the focused pane and mounts a fresh plugin instance in the new pane.
@@ -232,7 +251,7 @@ impl HypertileRuntime {
         let plugin = self.registry.instantiate_plugin(plugin_type)?;
         let pane_id = self.core.split_focused(direction)?;
         self.registry
-            .mount_plugin_instance(pane_id, plugin_type, plugin);
+            .mount_plugin_instance(pane_id, plugin_type, plugin, self.active);
 
         self.start_action_animation(now);
 
@@ -288,7 +307,7 @@ impl HypertileRuntime {
         let plugin = self.registry.instantiate_plugin(plugin_type)?;
         let _ = self.registry.remove_plugin_if_exists(pane_id);
         self.registry
-            .mount_plugin_instance(pane_id, plugin_type, plugin);
+            .mount_plugin_instance(pane_id, plugin_type, plugin, self.active);
         Ok(())
     }
 
@@ -306,7 +325,7 @@ impl HypertileRuntime {
         self.core.focus_pane(pane_id)?;
         let _ = self.registry.remove_plugin_if_exists(pane_id);
         self.registry
-            .mount_plugin_instance(pane_id, plugin_type, plugin);
+            .mount_plugin_instance(pane_id, plugin_type, plugin, self.active);
         Ok(())
     }
 
@@ -463,15 +482,40 @@ impl HypertileRuntime {
         plugin.on_event(event)
     }
 
+    fn action_patch(&mut self, action: &HypertileAction) {
+        match action {
+            HypertileAction::CloseFocused => {
+                let _ = self.close_focused();
+            }
+            HypertileAction::FocusMax => match self.core.state().full_pane() {
+                Some(focus_id) => {
+                    for (id, plugin) in self.registry.instances_mut() {
+                        if *id != focus_id {
+                            plugin.plugin().on_active_change(true);
+                        }
+                    }
+                }
+                None => {
+                    if let Some(focus_id) = self.core.state().focused_pane() {
+                        for (id, plugin) in self.registry.instances_mut() {
+                            if *id != focus_id {
+                                plugin.plugin().on_active_change(false);
+                            }
+                        }
+                    }
+                }
+            },
+            _ => (),
+        }
+    }
+
     pub fn apply_core_action(&mut self, action: HypertileAction) -> EventOutcome {
         let can_animate = self.can_animate_action(action);
         let now = Instant::now();
         if can_animate {
             self.capture_displayed_rects(now);
         }
-        if let HypertileAction::CloseFocused = action {
-            let _ = self.close_focused();
-        }
+        self.action_patch(&action);
         let outcome = self.core.apply_action(action);
         if !outcome.is_consumed() {
             return outcome;
@@ -528,7 +572,7 @@ impl HypertileRuntime {
             .start(area, self.core.state().panes(), now, self.animation_config);
     }
 
-    fn sync_registry_to_core(&mut self) {
+    fn sync_registry_to_core(&mut self, active: bool) {
         let Some(root) = self.core.root() else {
             self.registry.clear();
             return;
@@ -538,7 +582,9 @@ impl HypertileRuntime {
 
         for &pane_id in &keep {
             if self.registry.plugin(pane_id).is_none() {
-                let _ = self.registry.spawn_plugin(DEFAULT_PLUGIN_TYPE, pane_id);
+                let _ = self
+                    .registry
+                    .spawn_plugin(DEFAULT_PLUGIN_TYPE, pane_id, active);
             }
         }
     }

@@ -36,7 +36,7 @@ cargo run --example core_only
 | --------------------- | --------------------------------------------------------------------- |
 | Alt + p               | open palette                                                          |
 | Alt + q               | close focused block                                                   |
-| Alt + d               | toggle maximize                                                       |
+| Alt + d               | toggle maximization                                                   |
 | Alt + e               | open fish                                                             |
 | Alt + t               | split focused block automatically                                     |
 | Alt + s/v             | split focused block horizontally/vertically                           |

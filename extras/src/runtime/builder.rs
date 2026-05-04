@@ -151,6 +151,7 @@ impl HypertileRuntimeBuilder {
         HypertileRuntime {
             core,
             registry,
+            active: false,
             mode: InputMode::Layout,
             palette: PaletteState::with_config(
                 self.palette_width_percent,
