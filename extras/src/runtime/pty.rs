@@ -1,6 +1,6 @@
 use crate::{
     HypertilePlugin,
-    runtime::{termwiz::IntoRatatui, tokio_spawn},
+    runtime::{keyevent::convert_key_event, termwiz::IntoRatatui, tokio_spawn},
 };
 use image::{DynamicImage, EncodableLayout, RgbaImage};
 use portable_pty::{
@@ -17,9 +17,8 @@ use ratatui::{
 };
 use ratatui::{
     crossterm::event::{
-        self, Event as CrosstermEvent, KeyCode as CrosstermKeyCode, KeyEvent as CrosstermKeyEvent,
-        KeyEventKind, KeyModifiers as CrosstermModifiers, MouseEvent as CrosstermMouseEvent,
-        MouseEventKind as CrosstermMouseEventKind,
+        self, Event as CrosstermEvent, KeyEventKind, KeyModifiers as CrosstermModifiers,
+        MouseEvent as CrosstermMouseEvent, MouseEventKind as CrosstermMouseEventKind,
     },
     layout::Position,
 };
@@ -47,7 +46,7 @@ use tokio::{
 };
 use wezterm_surface::CursorShape;
 use wezterm_term::{
-    CellRef, KeyCode, KeyModifiers, MouseEventKind, Terminal, TerminalConfiguration, TerminalSize,
+    CellRef, KeyModifiers, MouseEventKind, Terminal, TerminalConfiguration, TerminalSize,
 };
 use wezterm_term::{MouseButton, input::MouseEvent};
 
@@ -371,19 +370,16 @@ fn handle_msg(msg: RenderMsg, state: &mut TerminalState) {
         RenderMsg::Event(event) => match event {
             HypertileEvent::Term(term_event) => match term_event {
                 CrosstermEvent::Key(key_event)
-                    if let Some((key, mods)) = crossterm_to_wezterm(key_event) =>
+                    if let Some(mut input_event) = convert_key_event(key_event) =>
                 {
                     match key_event.kind {
-                        KeyEventKind::Press => {
-                            let _ = state.terminal.key_down(key, mods);
-                        }
-
-                        KeyEventKind::Release => {
-                            let _ = state.terminal.key_up(key, mods);
+                        KeyEventKind::Press | KeyEventKind::Release => {
+                            let _ = state.terminal.send_key(input_event);
                         }
                         KeyEventKind::Repeat => {
-                            let _ = state.terminal.key_down(key, mods);
-                            let _ = state.terminal.key_up(key, mods);
+                            let _ = state.terminal.send_key(input_event.clone());
+                            input_event.key_is_down = false;
+                            let _ = state.terminal.send_key(input_event);
                         }
                     }
                 }
@@ -450,6 +446,10 @@ impl TerminalConfiguration for SimpleTermConfig {
     }
 
     fn enable_kitty_graphics(&self) -> bool {
+        true
+    }
+
+    fn enable_kitty_keyboard(&self) -> bool {
         true
     }
 
@@ -1031,50 +1031,6 @@ fn mouse_convert(event: CrosstermMouseEvent, state: &mut TerminalState) -> Mouse
     }
 }
 
-fn crossterm_to_wezterm(event: CrosstermKeyEvent) -> Option<(KeyCode, KeyModifiers)> {
-    let key_code = match event.code {
-        // 普通字符
-        CrosstermKeyCode::Char(c) => KeyCode::Char(c),
-
-        // 功能键
-        CrosstermKeyCode::F(n) => KeyCode::Function(n),
-
-        // 箭头键
-        CrosstermKeyCode::Up => KeyCode::UpArrow,
-        CrosstermKeyCode::Down => KeyCode::DownArrow,
-        CrosstermKeyCode::Left => KeyCode::LeftArrow,
-        CrosstermKeyCode::Right => KeyCode::RightArrow,
-
-        // 编辑键
-        CrosstermKeyCode::Home => KeyCode::Home,
-        CrosstermKeyCode::End => KeyCode::End,
-        CrosstermKeyCode::PageUp => KeyCode::PageUp,
-        CrosstermKeyCode::PageDown => KeyCode::PageDown,
-        CrosstermKeyCode::Tab => KeyCode::Tab,
-        CrosstermKeyCode::BackTab => KeyCode::Tab, // BackTab 用 Tab + Shift
-        CrosstermKeyCode::Backspace => KeyCode::Backspace,
-        CrosstermKeyCode::Delete => KeyCode::Delete,
-        CrosstermKeyCode::Insert => KeyCode::Insert,
-        CrosstermKeyCode::Enter => KeyCode::Enter,
-        CrosstermKeyCode::Esc => KeyCode::Escape,
-
-        // 其他
-        CrosstermKeyCode::CapsLock => KeyCode::CapsLock,
-        CrosstermKeyCode::ScrollLock => KeyCode::ScrollLock,
-        CrosstermKeyCode::NumLock => KeyCode::NumLock,
-        CrosstermKeyCode::PrintScreen => KeyCode::PrintScreen,
-        CrosstermKeyCode::Pause => KeyCode::Pause,
-
-        // Media 键等 - 暂不支持
-        _ => return None,
-    };
-
-    // 转换修饰符
-    let modifiers = crossterm_modifiers_to_wezterm(event.modifiers);
-
-    Some((key_code, modifiers))
-}
-
 /// 转换 Crossterm 的修饰符到 WezTerm
 fn crossterm_modifiers_to_wezterm(mods: CrosstermModifiers) -> KeyModifiers {
     let mut result = KeyModifiers::NONE;
@@ -1087,6 +1043,9 @@ fn crossterm_modifiers_to_wezterm(mods: CrosstermModifiers) -> KeyModifiers {
     }
     if mods.contains(CrosstermModifiers::SHIFT) {
         result |= KeyModifiers::SHIFT;
+    }
+    if mods.contains(CrosstermModifiers::SUPER) {
+        result |= KeyModifiers::SUPER;
     }
 
     result

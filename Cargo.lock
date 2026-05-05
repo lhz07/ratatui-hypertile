@@ -2037,6 +2037,7 @@ dependencies = [
  "tokio",
  "tui-logger",
  "wezterm-cell",
+ "wezterm-input-types",
  "wezterm-surface",
  "wezterm-term",
 ]
@@ -3110,6 +3111,7 @@ dependencies = [
  "wezterm-cell",
  "wezterm-dynamic",
  "wezterm-escape-parser",
+ "wezterm-input-types",
  "wezterm-surface",
 ]
 

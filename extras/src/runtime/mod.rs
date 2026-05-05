@@ -3,6 +3,7 @@ mod builder;
 pub mod checker;
 mod constants;
 mod default_plugin;
+pub mod keyevent;
 mod keymap;
 mod palette;
 pub mod pty;

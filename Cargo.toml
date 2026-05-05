@@ -26,6 +26,7 @@ ratatui = { version = "0.30", default-features = false, features = ["crossterm"]
 
 [patch."https://github.com/lhz07/wezterm_hyprtui.git"]
 wezterm-term = { path = "../wezterm_hyprtui/term" }
+wezterm-input-types = { path = "../wezterm_hyprtui/wezterm-input-types" }
 wezterm-cell = { path = "../wezterm_hyprtui/wezterm-cell" }
 wezterm-surface = { path = "../wezterm_hyprtui/wezterm-surface" }
 termwiz = { path = "../wezterm_hyprtui/termwiz" }

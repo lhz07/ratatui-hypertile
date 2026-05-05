@@ -76,7 +76,7 @@ fn main() -> io::Result<()> {
     // Set default level for unknown targets to Trace
     tui_logger::set_default_level(log::LevelFilter::Trace);
     tui_logger::set_env_filter_from_string(
-        "basic=trace, ratatui_hypertile_extras=trace, ratatui_hypertile=trace",
+        "basic=trace, ratatui_hypertile_extras=trace, ratatui_hypertile=trace, wezterm_term=info, termwiz=info",
     );
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(stdout(), EnterAlternateScreen)?;

@@ -20,6 +20,7 @@ anyhow = "1.0.102"
 tui-logger = "0.18.2"
 log.workspace = true
 wezterm-term = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
+wezterm-input-types = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 wezterm-cell = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 wezterm-surface = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }
 termwiz = { git = "https://github.com/lhz07/wezterm_hyprtui.git", branch = "hyprtui" }

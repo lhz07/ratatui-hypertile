@@ -15,7 +15,7 @@ pub trait HypertilePlugin {
         let _ = event;
         EventOutcome::Ignored
     }
-
+    // TODO: make pane id globally unique, and use it to decide whether to send render msg
     fn on_mount(&mut self, ctx: PluginContext) {
         let _ = ctx;
     }
