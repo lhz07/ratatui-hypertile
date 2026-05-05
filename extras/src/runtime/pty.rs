@@ -652,16 +652,16 @@ impl TerminalState {
         self.size.resize(area.width, area.height);
         self.terminal.resize(self.size);
     }
-    /// 将终端屏幕转换为 Ratatui 的 Line
-    pub fn render_screen(&mut self) -> (Vec<Line<'static>>, HashMap<u64, Vec<(u16, u16)>>) {
+    /// render wezterm screen to ratatui buffer
+    pub fn render_screen(&mut self, area: Rect, buf: &mut Buffer) -> HashMap<u64, Vec<(u16, u16)>> {
         let screen = self.terminal.screen();
-        let mut lines = Vec::new();
         let phys_row = screen.phys_row(0);
         let start = phys_row.saturating_sub(self.view_row.abs() as usize);
         let end = start + self.terminal.get_size().rows;
+        let mut lines = Vec::with_capacity(end - start);
         let mut pos_map: HashMap<u64, Vec<(u16, u16)>> = HashMap::new();
         // 遍历所有可见行
-        for (rows, line) in screen.lines_in_phys_range(start..end).iter().enumerate() {
+        for (rows, line) in screen.lines_in_phys_range_iter(start..end).enumerate() {
             let mut spans = Vec::new();
 
             let mut logical_col = 0usize;
@@ -708,7 +708,7 @@ impl TerminalState {
                         }
                     }
                 } else {
-                    let span = self.cell_to_span(cell);
+                    let span = Self::cell_to_span(cell);
                     spans.push(span);
                 }
                 logical_col += cell.width();
@@ -721,12 +721,16 @@ impl TerminalState {
 
             lines.push(Line::from(spans));
         }
-        (lines, pos_map)
+
+        let paragraph = Paragraph::new(lines);
+        paragraph.render(area, buf);
+
+        pos_map
     }
 
     /// 将单个 cell 转换为 Ratatui 的 Span
-    fn cell_to_span(&self, cell: CellRef<'_>) -> Span<'static> {
-        let text = cell.str().to_string();
+    fn cell_to_span(cell: CellRef<'_>) -> Span<'_> {
+        let text = cell.str();
         let style: Style = cell.attrs().into_ratatui();
 
         Span::styled(text, style)
@@ -771,11 +775,11 @@ impl Widget for TerminalWidget<'_> {
             return;
         }
 
-        let (lines, pos_map) = self.state.render_screen();
-        let paragraph = Paragraph::new(lines).scroll((0, 0));
-
-        paragraph.render(area, buf);
-        if self.state.ani_active > 0 || matches!(PICKER.protocol_type(), ProtocolType::Halfblocks) {
+        let pos_map = self.state.render_screen(area, buf);
+        if pos_map.is_empty()
+            || self.state.ani_active > 0
+            || matches!(PICKER.protocol_type(), ProtocolType::Halfblocks)
+        {
             return;
         }
         for (id, image) in &mut self.state.images {
@@ -827,7 +831,6 @@ impl Widget for TerminalWidget<'_> {
                 }
             }
         }
-
         self.state.dirty = false;
     }
 }
